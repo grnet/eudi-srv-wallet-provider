@@ -24,6 +24,33 @@ services:
       - wallet-provider
     ports:
       - "9000:8080"
+  provider:
+    image: grnet_wallet_provider:latest
+    environment:
+      DATABASE_URL: r2dbc:pool:postgresql://postgres@172.18.0.2:5432/postgres
+      DATABASE_PASSWORD: password
+      SIGNINGKEY_KEYSTOREFILE: /keystore.jks
+      SIGNINGKEY_KEYSTOREPASSWORD: password
+      SIGNINGKEY_KEYSTORETYPE: JKS
+      SIGNINGKEY_KEYALIAS: signing_alias
+      SIGNINGKEY_KEYPASSWORD: password
+      SIGNINGKEY_ALGORITHM: ES256
+      KEYATTESTATION_CERTIFICATION: https://ec.europa.eu
+      WALLETINSTANCEATTESTATION_WALLETNAME: GRNET
+      WALLETINSTANCEATTESTATION_WALLETLINK: https://grnet.gr
+      WALLETINSTANCEATTESTATION_WALLETVERSION: v0.1
+      WALLETINSTANCEATTESTATION_WALLETSOLUTIONCERTIFICATIONINFORMATION: 'N/A'
+      TOKENSTATUSLISTSERVICE_SERVICEURL: https://demo.eudiw.grnet.gr:5603/token_status_list/take
+      TOKENSTATUSLISTSERVICE_APIKEY: test
+    volumes:
+      - ./keystore.jks:/keystore.jks:RO
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - wallet-provider
+    ports:
+      - "5606:8080"
 
 networks:
   wallet-provider:
