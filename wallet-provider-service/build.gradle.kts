@@ -203,3 +203,17 @@ dependencyCheck {
 tasks.test {
     useJUnitPlatform()
 }
+
+ktor {
+    security {
+        ssl {
+            keyStore = keystore.jks
+            keyAlias = tls
+            keyStorePassword = password
+            privateKeyPassword = password
+            // trustStore = truststore.jks
+            // trustStorePassword = password
+            enabledProtocols = ["TLSv1.2", "TLSv1.3"]
+        }
+    }
+}
