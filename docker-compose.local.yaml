@@ -1,0 +1,16 @@
+# Local-testing overlay — use alongside docker-compose.yaml to test the
+# Caddy/TLS setup on a laptop, without a public domain or real certs:
+#
+#   docker compose -f docker-compose.yaml -f docker-compose.local.yaml up -d
+#   curl -vk --resolve demo.eudiw.grnet.gr:443:127.0.0.1 https://demo.eudiw.grnet.gr/swagger
+#
+# Swaps in Caddyfile.local (self-signed, via `tls internal`) and frees the
+# Postgres host port in case something else on your machine already uses 5432.
+services:
+  postgres:
+    ports: !reset []
+  caddy:
+    volumes:
+      - ./Caddyfile.local:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config

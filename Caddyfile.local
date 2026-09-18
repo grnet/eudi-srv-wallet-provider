@@ -1,0 +1,11 @@
+# Local-testing variant of ./Caddyfile.
+#
+# The real Caddyfile relies on Caddy's Automatic HTTPS, which needs Let's
+# Encrypt to reach this machine over the public domain — impossible from a
+# laptop with no public DNS/IP. `tls internal` swaps that for Caddy's own
+# built-in local CA, so you get a real (if untrusted) HTTPS connection to
+# test the reverse-proxy mechanism itself. Not used in production.
+demo.eudiw.grnet.gr {
+	tls internal
+	reverse_proxy provider:8080
+}
