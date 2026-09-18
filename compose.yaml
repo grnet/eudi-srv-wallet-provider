@@ -1,0 +1,145 @@
+# Local development stack.
+#
+#   ./gradlew :wallet-provider-service:jibDockerBuild --image=eudiw-wallet-provider:dev
+#   docker compose up -d
+#
+# The image comes from jib; there is no Dockerfile. Compose prefers compose.yaml
+# over upstream's docker-compose.yaml, so a bare `docker compose up` runs this
+# one. To run upstream's: docker compose -f docker-compose.yaml up
+
+name: eudiw-wallet-provider
+
+services:
+
+  postgres:
+    image: postgres:18.3-alpine
+    container_name: eudiw-wallet-provider-db
+    environment:
+      POSTGRES_PASSWORD: password
+    volumes:
+      # Creates the challenge table. The entrypoint only runs this on an empty
+      # data directory, so a schema change means removing the volume.
+      - ./schemas/postgresql:/docker-entrypoint-initdb.d:ro
+      # Postgres 18 wants a single mount at /var/lib/postgresql and puts the data
+      # in a subdirectory. Mounting /var/lib/postgresql/data, correct up to 17,
+      # makes the entrypoint refuse to start.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      # CMD, not CMD-SHELL: the shell form takes a single string and drops the
+      # remaining arguments, leaving pg_isready to connect as "root".
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - wallet-provider
+
+  # Generates the JWT signing keystore into a named volume before the service
+  # starts, so no openssl or keytool is needed on the host. Skips if the keystore
+  # exists, so repeated runs keep the same signing identity.
+  #
+  # This key signs the attestations the service issues. It is not TLS and not
+  # CA-issued: a self-signed EC P-256 leaf that the wallet reads from /jwks.
+  # Parameters match SIGNINGKEY_ALGORITHM below.
+  keystore-init:
+    image: eclipse-temurin:25-jdk
+    container_name: eudiw-wallet-provider-keystore-init
+    volumes:
+      - signing-keystore:/keystore
+    command:
+      - sh
+      - -euc
+      - |
+        if [ -f /keystore/keystore.jks ]; then
+          echo "keystore.jks exists, leaving it alone"
+          exit 0
+        fi
+        echo "generating signing keystore"
+        cd /tmp
+        openssl ecparam -name prime256v1 -genkey -noout -out signing_key.pem
+        openssl req -new -x509 -sha256 -days 365 \
+          -key signing_key.pem -out signing_cert.pem \
+          -subj "/C=GR/ST=Athens/L=Attica/O=GRNET/CN=GRNET Wallet Backend Signer" \
+          -addext "basicConstraints=critical,CA:FALSE" \
+          -addext "keyUsage=critical,digitalSignature" \
+          -addext "subjectKeyIdentifier=hash"
+        openssl pkcs12 -export -in signing_cert.pem -inkey signing_key.pem \
+          -name signing_alias -out out.p12 -passout pass:password
+        keytool -importkeystore -noprompt \
+          -srckeystore out.p12 -srcstoretype PKCS12 -srcstorepass password \
+          -destkeystore /keystore/keystore.jks -deststoretype JKS \
+          -deststorepass password
+        chmod 644 /keystore/keystore.jks
+        echo "done"
+
+  provider:
+    container_name: eudiw-wallet-provider
+    # Override to run a published image, e.g.
+    # ghcr.io/grnet/eudi-srv-wallet-provider:feat-docker
+    image: ${WALLET_PROVIDER_IMAGE:-eudiw-wallet-provider:dev}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keystore-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: r2dbc:pool:postgresql://postgres@postgres:5432/postgres
+      DATABASE_PASSWORD: password
+
+      SIGNINGKEY_KEYSTOREFILE: /keystore/keystore.jks
+      SIGNINGKEY_KEYSTOREPASSWORD: password
+      SIGNINGKEY_KEYSTORETYPE: JKS
+      SIGNINGKEY_KEYALIAS: signing_alias
+      SIGNINGKEY_KEYPASSWORD: password
+      SIGNINGKEY_ALGORITHM: ES256
+
+      # OAuth client id for attestation-based client authentication. Must match
+      # what the wallet sends. Upstream defaults to "wallet-dev".
+      CLIENTID: eudiw-abca
+
+      KEYATTESTATION_CERTIFICATION: https://ec.europa.eu
+      WALLETINSTANCEATTESTATION_WALLETNAME: GRNET
+      WALLETINSTANCEATTESTATION_WALLETLINK: https://grnet.gr
+      WALLETINSTANCEATTESTATION_WALLETVERSION: v0.1
+      WALLETINSTANCEATTESTATION_WALLETSOLUTIONCERTIFICATIONINFORMATION: "N/A"
+
+      # Signed into the wallet unit attestation as `iss` and validated by the
+      # wallet, so it must be an address the wallet can reach. A service name
+      # resolves between containers but fails there.
+      ISSUER_PUBLICURL: ${ISSUER_PUBLICURL:-http://localhost:5606}
+
+      # The deployed status list, since there is no local one. Every attestation
+      # issued here permanently allocates an index on a shared service holding
+      # live data. Its Let's Encrypt certificate is in the JVM default trust
+      # store, so no CA setup is needed.
+      TOKENSTATUSLISTSERVICE_SERVICEURL: ${TOKENSTATUSLISTSERVICE_SERVICEURL:-https://demo.eudiw.grnet.gr:5603/token_status_list/take}
+      TOKENSTATUSLISTSERVICE_APIKEY: ${TOKENSTATUSLISTSERVICE_APIKEY:-test}
+    volumes:
+      - signing-keystore:/keystore:ro
+    ports:
+      - "${WALLET_PROVIDER_PORT:-5606}:8080"
+    networks:
+      - wallet-provider
+    restart: unless-stopped
+
+  # docker compose --profile tools up -d
+  adminer:
+    image: adminer:5.4.2-standalone
+    container_name: eudiw-wallet-provider-adminer
+    profiles: [tools]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${ADMINER_PORT:-9000}:8080"
+    networks:
+      - wallet-provider
+
+volumes:
+  postgres-data:
+  signing-keystore:
+
+networks:
+  wallet-provider:
+    name: eudiw-wallet-provider
