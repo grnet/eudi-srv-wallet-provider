@@ -51,7 +51,24 @@ services:
       - wallet-provider
     ports:
       - "5606:8080"
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      - provider
+    networks:
+      - wallet-provider
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
 
 networks:
   wallet-provider:
     name: wallet-provider
+
+volumes:
+  caddy_data:
+  caddy_config:

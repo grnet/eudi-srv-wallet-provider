@@ -1,0 +1,3 @@
+demo.eudiw.grnet.gr {
+	reverse_proxy provider:8080
+}
