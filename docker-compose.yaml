@@ -27,7 +27,7 @@ services:
   provider:
     image: grnet_wallet_provider:latest
     environment:
-      DATABASE_URL: r2dbc:pool:postgresql://postgres@172.18.0.2:5432/postgres
+      DATABASE_URL: r2dbc:pool:postgresql://postgres@postgres:5432/postgres
       DATABASE_PASSWORD: password
       SIGNINGKEY_KEYSTOREFILE: /keystore.jks
       SIGNINGKEY_KEYSTOREPASSWORD: password
