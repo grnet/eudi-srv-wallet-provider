@@ -101,16 +101,15 @@ jobs:
           OCI_VENDOR: GRNET
         run: |
           set -euo pipefail
-          # jib takes one --image, so push the first tag and pass the rest via
-          # jib.to.tags. Every tag then points at a single manifest instead of
-          # several near-identical builds.
-          primary=$(printf '%s' "${{ steps.meta.outputs.tags }}" | head -1)
-          others=$(printf '%s' "${{ steps.meta.outputs.tags }}" | tail -n +2 | sed 's|.*:||' | paste -sd, -)
-          echo "primary: $primary"
-          echo "additional tags: ${others:-none}"
-          ./gradlew --no-daemon :wallet-provider-service:jib \
-            --image="$primary" \
-            ${others:+-Djib.to.tags="$others"}
+          # jib takes one --image per invocation and the Gradle plugin ignores
+          # -Djib.to.tags, unlike the Maven one, so each tag is pushed in its own
+          # call. The layers are identical and already in the registry after the
+          # first, so the extra calls only upload a manifest.
+          printf '%s\n' "${{ steps.meta.outputs.tags }}" | while read -r tag; do
+            [ -n "$tag" ] || continue
+            echo "==> $tag"
+            ./gradlew --no-daemon :wallet-provider-service:jib --image="$tag"
+          done
 
       - name: Build image without pushing
         if: github.event_name == 'pull_request'
