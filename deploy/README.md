@@ -11,7 +11,6 @@ before anything else can be routed.
     compose.yaml                 the edge, postgres, keystore init, the service
     stack.env                    non-secret config, committed
     ssh/config, ssh/known_hosts  the deploy target
-    nginx-proxy/conf.d/          proxy-wide nginx settings
 
 Secrets are passed to compose through the deploy step's environment. Compose
 interpolates `${...}` client-side on the runner, so the values never touch disk
@@ -77,6 +76,19 @@ Encrypt staging CA for the first attempt; its limits are far higher.
     export WALLET_PROVIDER_IMAGE=ghcr.io/grnet/eudi-srv-wallet-provider:sha-<sha>
     export DATABASE_PASSWORD=... SIGNINGKEY_KEYSTOREPASSWORD=... TOKENSTATUSLISTSERVICE_APIKEY=...
     docker compose -f deploy/compose.yaml -p eudiw up -d
+
+## No bind mounts
+
+Everything the containers need arrives as an image, a named volume, or an inline
+`configs:` entry. That is a constraint of driving a remote daemon rather than a
+preference: compose resolves relative paths on the client and sends the daemon
+absolute ones, so a bind mount points at a path on the *server*. Docker creates
+it when it is missing, so the failure is a silently empty directory rather than
+an error.
+
+Both the database schema and the nginx `client_max_body_size` setting are inline
+`configs:` for this reason. The schema duplicates
+`schemas/postgresql/V1.sql`, so the two need to stay in step.
 
 ## Still to sort
 
