@@ -55,17 +55,16 @@ proxy by Host header.
 ## TLS
 
 acme-companion issues a certificate for every container setting
-`LETSENCRYPT_HOST`. `LETSENCRYPT_TEST=true` in `stack.env` points it at the Let's
-Encrypt **staging** CA: certificates are not publicly trusted, but the rate
-limits are far higher, so a misconfiguration costs nothing.
+`LETSENCRYPT_HOST`, over the HTTP-01 challenge, so the name has to resolve to
+this box from public DNS.
 
-Verified 2026-09-19: challenge completed, certificate installed, nginx reloaded,
-and `https://demo.eudiw.grnet.gr/wallet-provider/jwks` returns 200 behind a
-`(STAGING) Ersatz Emmer YR2` certificate.
+Live as of 2026-09-19: Let's Encrypt `YR2`, valid to 2026-12-18.
+`https://demo.eudiw.grnet.gr/wallet-provider/jwks` returns 200 and the chain
+validates without `-k`.
 
-For real certificates, set `LETSENCRYPT_TEST=false` and redeploy. Change
-`ISSUER_PUBLICURL` to `https://` at the same time; it is signed into attestations
-as `iss`, so changing it later invalidates ones already issued.
+Set `LETSENCRYPT_TEST=true` in `stack.env` to use the staging CA instead. Its
+certificates are untrusted but the rate limits are far higher, which is worth
+doing before any change that might fail issuance.
 
 ## By hand
 
