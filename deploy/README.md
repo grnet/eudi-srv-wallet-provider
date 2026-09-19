@@ -102,15 +102,21 @@ Verified 2026-09-19:
 Set `WALLET_PROVIDER_PATH=` empty to serve at the hostname root instead.
 
 Two caveats. The Android app hardcodes `walletProviderHost` and needs the
-prefixed value. And other services are harder: the status list builds its URL
-from a hardcoded Python constant rather than config. See `WEBUILD/DOCKER.md`.
+prefixed value. The status list used to be harder, building its URL from a
+hardcoded Python constant, but it now reads `SERVICE_URL` from the environment.
+See `WEBUILD/DOCKER.md`.
 
 ## Still to sort
 
 - The DNS record, and TLS with it.
 - gfour's manual stack still runs on that box on 5606, 5603 and 5607. Project
-  name `eudiw` and no conflicting published port, so they coexist, but the old
-  one should be retired.
+  name `eudiw` and no conflicting published port, so they coexist. The box is
+  being scrapped rather than cleaned up, so retiring them is not worth the work.
+- `TOKENSTATUSLISTSERVICE_SERVICEURL` is now portless, pointing at the
+  containerised status list on 443. It has to change in lockstep with that
+  service's own `SERVICE_URL`: the wallet provider calls the URL, the status list
+  signs it into tokens as `sub`, and if the two disagree the tokens point
+  somewhere the caller never used.
 - The image runs as root. jib defaults to uid 0 unless `jib.container.user` is
   set, which would mean patching upstream's build file. Worth raising upstream.
 - `TOKENSTATUSLISTSERVICE_APIKEY` is `test`, which is what the status list

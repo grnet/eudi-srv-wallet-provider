@@ -113,7 +113,7 @@ services:
       # issued here permanently allocates an index on a shared service holding
       # live data. Its Let's Encrypt certificate is in the JVM default trust
       # store, so no CA setup is needed.
-      TOKENSTATUSLISTSERVICE_SERVICEURL: ${TOKENSTATUSLISTSERVICE_SERVICEURL:-https://demo.eudiw.grnet.gr:5603/token_status_list/take}
+      TOKENSTATUSLISTSERVICE_SERVICEURL: ${TOKENSTATUSLISTSERVICE_SERVICEURL:-https://demo.eudiw.grnet.gr/token_status_list/take}
       TOKENSTATUSLISTSERVICE_APIKEY: ${TOKENSTATUSLISTSERVICE_APIKEY:-test}
     volumes:
       - signing-keystore:/keystore:ro
