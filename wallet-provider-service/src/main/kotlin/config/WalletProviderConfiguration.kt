@@ -48,7 +48,7 @@ data class WalletProviderConfiguration(
     val platformKeyAttestationValidation: PlatformKeyAttestationValidationConfiguration? = null,
     val challenge: ChallengeConfiguration = ChallengeConfiguration(),
     val issuer: IssuerConfiguration = IssuerConfiguration(),
-    val clientId: ClientId = ClientId("eudiw-abca"),
+    val clientId: ClientId = ClientId("wallet-dev"),
     val walletInstanceAttestation: WalletInstanceAttestationConfiguration,
     val keyAttestation: KeyAttestationConfiguration,
     val tokenStatusListService: TokenStatusListServiceConfiguration,
