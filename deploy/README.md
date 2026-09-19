@@ -52,22 +52,20 @@ Verification after the roll: containers running, networks present, provider
 attached to `proxy-net`, `nginx -t` passing, and `/jwks` answering through the
 proxy by Host header.
 
-## TLS is not on yet
+## TLS
 
-`wallet-provider.eudiw.grnet.gr` does not resolve, so `LETSENCRYPT_*` is
-commented out and `ISSUER_PUBLICURL` is `http://`. acme-companion runs but does
-nothing until a container sets `LETSENCRYPT_HOST`. HTTP-01 resolves the name from
-public DNS, so an `/etc/hosts` entry does not help it, and failed attempts count
-against rate limits.
+acme-companion issues a certificate for every container setting
+`LETSENCRYPT_HOST`. `LETSENCRYPT_TEST=true` in `stack.env` points it at the Let's
+Encrypt **staging** CA: certificates are not publicly trusted, but the rate
+limits are far higher, so a misconfiguration costs nothing.
 
-`VIRTUAL_HOST` is set regardless, so routing works today via `/etc/hosts`:
+Verified 2026-09-19: challenge completed, certificate installed, nginx reloaded,
+and `https://demo.eudiw.grnet.gr/wallet-provider/jwks` returns 200 behind a
+`(STAGING) Ersatz Emmer YR2` certificate.
 
-    3.69.83.252  wallet-provider.eudiw.grnet.gr
-
-Once the record exists: uncomment `LETSENCRYPT_*`, change `ISSUER_PUBLICURL` to
-`https://`, redeploy. That URL is signed into attestations as `iss`, so changing
-it invalidates ones already issued. Worth pointing `ACME_CA_URI` at the Let's
-Encrypt staging CA for the first attempt; its limits are far higher.
+For real certificates, set `LETSENCRYPT_TEST=false` and redeploy. Change
+`ISSUER_PUBLICURL` to `https://` at the same time; it is signed into attestations
+as `iss`, so changing it later invalidates ones already issued.
 
 ## By hand
 

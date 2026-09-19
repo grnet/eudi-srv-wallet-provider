@@ -47,9 +47,9 @@ services:
   # Obtains and renews a Let's Encrypt certificate for every container that sets
   # LETSENCRYPT_HOST, writing into the volumes nginx-proxy reads.
   #
-  # Idle until a container sets LETSENCRYPT_HOST, which is commented out on the
-  # provider below until the DNS record exists. The HTTP-01 challenge is resolved
-  # from public DNS, so an /etc/hosts entry does not help it.
+  # Issues a certificate for every container that sets LETSENCRYPT_HOST. The
+  # HTTP-01 challenge is resolved from public DNS, so the name has to point at
+  # this box.
   acme-companion:
     image: nginxproxy/acme-companion:2.8
     container_name: nginx-proxy-acme
@@ -165,10 +165,8 @@ services:
       # VIRTUAL_DEST=/ strips the prefix, so the container still sees /jwks.
       VIRTUAL_PATH: ${WALLET_PROVIDER_PATH:-/}
       VIRTUAL_DEST: /
-      # Uncomment once the DNS record exists. acme-companion does nothing for
-      # this container until they are set.
-      # LETSENCRYPT_HOST: ${WALLET_PROVIDER_HOST}
-      # LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL}
+      LETSENCRYPT_HOST: ${WALLET_PROVIDER_HOST}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL}
 
       DATABASE_URL: r2dbc:pool:postgresql://postgres@postgres:5432/postgres
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:?repository secret, see deploy/README.md}
