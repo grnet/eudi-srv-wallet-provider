@@ -90,6 +90,24 @@ Both the database schema and the nginx `client_max_body_size` setting are inline
 `configs:` for this reason. The schema duplicates
 `schemas/postgresql/V1.sql`, so the two need to stay in step.
 
+## Path routing
+
+Mounted under a path on an existing hostname rather than its own name, so no new
+DNS record is needed. `VIRTUAL_DEST=/` strips the prefix before forwarding, so
+the application is unaware of it; `ISSUER_PUBLICURL` supplies it on the way out.
+
+Verified 2026-09-19:
+
+    /wallet-provider/jwks       200
+    /wallet-provider/swagger    200
+    jwks_uri in the metadata    http://demo.eudiw.grnet.gr/wallet-provider/jwks -> 200
+
+Set `WALLET_PROVIDER_PATH=` empty to serve at the hostname root instead.
+
+Two caveats. The Android app hardcodes `walletProviderHost` and needs the
+prefixed value. And other services are harder: the status list builds its URL
+from a hardcoded Python constant rather than config. See `WEBUILD/DOCKER.md`.
+
 ## Still to sort
 
 - The DNS record, and TLS with it.
