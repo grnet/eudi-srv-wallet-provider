@@ -162,6 +162,9 @@ services:
     environment:
       VIRTUAL_HOST: ${WALLET_PROVIDER_HOST:?set in stack.env}
       VIRTUAL_PORT: "8080"
+      # VIRTUAL_DEST=/ strips the prefix, so the container still sees /jwks.
+      VIRTUAL_PATH: ${WALLET_PROVIDER_PATH:-/}
+      VIRTUAL_DEST: /
       # Uncomment once the DNS record exists. acme-companion does nothing for
       # this container until they are set.
       # LETSENCRYPT_HOST: ${WALLET_PROVIDER_HOST}
