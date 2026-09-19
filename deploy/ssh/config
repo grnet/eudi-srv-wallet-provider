@@ -12,7 +12,7 @@ Host target
     HostName 3.69.83.252
     Port 22
     User ubuntu
-    IdentityFile ~/.ssh/deploy_key
+    IdentityFile ~/.ssh/eudiw-deploy
     IdentitiesOnly yes
     StrictHostKeyChecking yes
     UserKnownHostsFile ~/.ssh/known_hosts

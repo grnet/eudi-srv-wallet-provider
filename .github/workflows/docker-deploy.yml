@@ -89,8 +89,8 @@ jobs:
           chmod 700 ~/.ssh
           install -m 600 deploy/ssh/config ~/.ssh/config
           install -m 644 deploy/ssh/known_hosts ~/.ssh/known_hosts
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/eudiw-deploy
+          chmod 600 ~/.ssh/eudiw-deploy
           ssh -o BatchMode=yes target 'echo "connected to $(hostname)"'
 
       # Compose interpolates ${...} client-side, here on the runner, and sends

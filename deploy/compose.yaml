@@ -33,9 +33,14 @@ services:
       - proxy-vhost:/etc/nginx/vhost.d
       - proxy-html:/usr/share/nginx/html
       - proxy-conf:/etc/nginx/conf.d
-      # Proxy-wide settings. nginx-proxy reads any .conf file here; there is no
-      # environment variable for client_max_body_size.
-      - ./nginx-proxy/conf.d/client-max-body-size.conf:/etc/nginx/conf.d/client-max-body-size.conf:ro
+    configs:
+      # Proxy-wide settings. nginx-proxy reads any .conf file in conf.d, and
+      # there is no environment variable for client_max_body_size. Inlined for
+      # the same reason as the database schema below: a bind mount would resolve
+      # on the remote filesystem, where Docker would create a directory of this
+      # name and nginx would fail to read it.
+      - source: client-max-body-size
+        target: /etc/nginx/conf.d/client-max-body-size.conf
     networks:
       - proxy-net
 
@@ -74,11 +79,19 @@ services:
     environment:
       POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?repository secret, see deploy/README.md}
     volumes:
-      - ../schemas/postgresql:/docker-entrypoint-initdb.d:ro
       # Postgres 18 wants a single mount at /var/lib/postgresql and puts the data
       # in a subdirectory. Mounting /var/lib/postgresql/data, correct up to 17,
       # makes the entrypoint refuse to start.
       - postgres-data:/var/lib/postgresql
+    configs:
+      # schemas/postgresql/V1.sql, inlined. A bind mount cannot be used here:
+      # compose sends paths to the daemon verbatim, and over DOCKER_HOST=ssh://
+      # they resolve on the remote filesystem, where the repository does not
+      # exist. Docker would create an empty directory and postgres would
+      # initialise with no schema, which the service then refuses to start
+      # against. Keep in sync with schemas/postgresql/V1.sql.
+      - source: init-sql
+        target: /docker-entrypoint-initdb.d/V1.sql
     healthcheck:
       # CMD, not CMD-SHELL: the shell form takes a single string and drops the
       # remaining arguments, leaving pg_isready to connect as "root".
@@ -187,6 +200,21 @@ services:
       # Both: proxy-net for inbound traffic, wallet-provider to reach postgres.
       - proxy-net
       - wallet-provider
+
+configs:
+  # The platform key attestation endpoints take an X.509 chain from the Android
+  # keystore alongside a JWK set. Under nginx's 1m default a large one would get
+  # a 413 from the proxy before reaching the service, which reads as a client
+  # error rather than a proxy limit.
+  client-max-body-size:
+    content: |
+      client_max_body_size 4m;
+
+  init-sql:
+    content: |
+      CREATE TABLE IF NOT EXISTS challenges (id BIGSERIAL PRIMARY KEY, "value" bytea NOT NULL, created_at TIMESTAMP NOT NULL, expires_at TIMESTAMP NOT NULL, unused BOOLEAN NOT NULL);
+      ALTER TABLE challenges ADD CONSTRAINT challenges_value_unique_idx UNIQUE ("value");
+      CREATE SEQUENCE IF NOT EXISTS challenges_id_seq START WITH 1 MINVALUE 1 MAXVALUE 9223372036854775807;
 
 volumes:
   proxy-certs:
