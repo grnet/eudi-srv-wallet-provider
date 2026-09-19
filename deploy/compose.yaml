@@ -41,6 +41,8 @@ services:
       # name and nginx would fail to read it.
       - source: client-max-body-size
         target: /etc/nginx/conf.d/client-max-body-size.conf
+      - source: block-ip-access
+        target: /etc/nginx/conf.d/block-ip-access.conf
     networks:
       - proxy-net
 
@@ -203,6 +205,27 @@ services:
       - wallet-provider
 
 configs:
+  # Requests that arrive without a known Host, which means direct to the IP or
+  # with a hostname we do not serve, get 444: nginx closes the connection with
+  # no response at all. The default is a 503, which tells a scanner something is
+  # here and worth probing further. ssl_reject_handshake does the same at the TLS
+  # layer, so an https probe does not even complete a handshake.
+  block-ip-access:
+    content: |
+      server {
+          listen 80 default_server;
+          listen [::]:80 default_server;
+          server_name _;
+          return 444;
+      }
+      server {
+          listen 443 ssl default_server;
+          listen [::]:443 ssl default_server;
+          server_name _;
+          ssl_reject_handshake on;
+          return 444;
+      }
+
   # The platform key attestation endpoints take an X.509 chain from the Android
   # keystore alongside a JWK set. Under nginx's 1m default a large one would get
   # a 413 from the proxy before reaching the service, which reads as a client
