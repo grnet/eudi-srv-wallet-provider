@@ -1,0 +1,258 @@
+# Production stack for the EC2 box, plus the shared edge.
+#
+# Deployed by .github/workflows/docker-deploy.yml, which points a local compose
+# client at the remote daemon over SSH. The file itself never lands on the
+# server. To run it by hand:
+#
+#   DOCKER_HOST=ssh://target docker compose \
+#     -f deploy/compose.yaml -p eudiw up -d
+#
+# This repository owns the edge for the whole deployment: nginx-proxy,
+# acme-companion and the proxy-net network are defined here and nowhere else.
+# Every other service repository declares proxy-net as external and adds only its
+# own containers, so this stack has to be up before anything else can be routed
+# or get a certificate.
+
+name: eudiw
+
+services:
+
+  # Watches the Docker socket and writes an nginx vhost for every container that
+  # sets VIRTUAL_HOST. The only container in the deployment that publishes ports.
+  nginx-proxy:
+    image: nginxproxy/nginx-proxy:1.11-alpine
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Read-only: docker-gen only needs to watch events.
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - proxy-certs:/etc/nginx/certs
+      - proxy-vhost:/etc/nginx/vhost.d
+      - proxy-html:/usr/share/nginx/html
+      - proxy-conf:/etc/nginx/conf.d
+    configs:
+      # Proxy-wide settings. nginx-proxy reads any .conf file in conf.d, and
+      # there is no environment variable for client_max_body_size. Inlined for
+      # the same reason as the database schema below: a bind mount would resolve
+      # on the remote filesystem, where Docker would create a directory of this
+      # name and nginx would fail to read it.
+      - source: client-max-body-size
+        target: /etc/nginx/conf.d/client-max-body-size.conf
+      - source: block-ip-access
+        target: /etc/nginx/conf.d/block-ip-access.conf
+    networks:
+      - proxy-net
+
+  # Obtains and renews a Let's Encrypt certificate for every container that sets
+  # LETSENCRYPT_HOST, writing into the volumes nginx-proxy reads.
+  #
+  # Issues a certificate for every container that sets LETSENCRYPT_HOST. The
+  # HTTP-01 challenge is resolved from public DNS, so the name has to point at
+  # this box.
+  acme-companion:
+    image: nginxproxy/acme-companion:2.8
+    container_name: nginx-proxy-acme
+    restart: unless-stopped
+    depends_on:
+      - nginx-proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - proxy-certs:/etc/nginx/certs
+      - proxy-vhost:/etc/nginx/vhost.d
+      - proxy-html:/usr/share/nginx/html
+      - proxy-conf:/etc/nginx/conf.d
+      - acme-state:/etc/acme.sh
+    environment:
+      NGINX_PROXY_CONTAINER: nginx-proxy
+      DEFAULT_EMAIL: ${LETSENCRYPT_EMAIL:?set in stack.env}
+      # Point at the staging CA while iterating; its rate limits are far higher
+      # and its certificates are not publicly trusted.
+      # ACME_CA_URI: https://acme-staging-v02.api.letsencrypt.org/directory
+    networks:
+      - proxy-net
+
+  postgres:
+    image: postgres:18.3-alpine
+    container_name: eudiw-wallet-provider-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?repository secret, see deploy/README.md}
+    volumes:
+      # Postgres 18 wants a single mount at /var/lib/postgresql and puts the data
+      # in a subdirectory. Mounting /var/lib/postgresql/data, correct up to 17,
+      # makes the entrypoint refuse to start.
+      - postgres-data:/var/lib/postgresql
+    configs:
+      # schemas/postgresql/V1.sql, inlined. A bind mount cannot be used here:
+      # compose sends paths to the daemon verbatim, and over DOCKER_HOST=ssh://
+      # they resolve on the remote filesystem, where the repository does not
+      # exist. Docker would create an empty directory and postgres would
+      # initialise with no schema, which the service then refuses to start
+      # against. Keep in sync with schemas/postgresql/V1.sql.
+      - source: init-sql
+        target: /docker-entrypoint-initdb.d/V1.sql
+    healthcheck:
+      # CMD, not CMD-SHELL: the shell form takes a single string and drops the
+      # remaining arguments, leaving pg_isready to connect as "root".
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - wallet-provider
+
+  # Generates the JWT signing keystore into a named volume on first deploy.
+  #
+  # Skips if the keystore exists, which matters more here than locally: the
+  # public key is published at /jwks and is what verifies every attestation this
+  # service has issued. Regenerating it invalidates all of them.
+  keystore-init:
+    image: eclipse-temurin:25-jdk
+    container_name: eudiw-wallet-provider-keystore-init
+    volumes:
+      - signing-keystore:/keystore
+    command:
+      - sh
+      - -euc
+      - |
+        if [ -f /keystore/keystore.jks ]; then
+          echo "keystore.jks exists, leaving it alone"
+          exit 0
+        fi
+        echo "generating signing keystore"
+        cd /tmp
+        openssl ecparam -name prime256v1 -genkey -noout -out signing_key.pem
+        openssl req -new -x509 -sha256 -days 365 \
+          -key signing_key.pem -out signing_cert.pem \
+          -subj "/C=GR/ST=Athens/L=Attica/O=GRNET/CN=GRNET Wallet Backend Signer" \
+          -addext "basicConstraints=critical,CA:FALSE" \
+          -addext "keyUsage=critical,digitalSignature" \
+          -addext "subjectKeyIdentifier=hash"
+        openssl pkcs12 -export -in signing_cert.pem -inkey signing_key.pem \
+          -name signing_alias -out out.p12 -passout pass:"$${SIGNINGKEY_KEYSTOREPASSWORD}"
+        keytool -importkeystore -noprompt \
+          -srckeystore out.p12 -srcstoretype PKCS12 \
+          -srcstorepass "$${SIGNINGKEY_KEYSTOREPASSWORD}" \
+          -destkeystore /keystore/keystore.jks -deststoretype JKS \
+          -deststorepass "$${SIGNINGKEY_KEYSTOREPASSWORD}"
+        chmod 644 /keystore/keystore.jks
+        echo "done"
+    environment:
+      SIGNINGKEY_KEYSTOREPASSWORD: ${SIGNINGKEY_KEYSTOREPASSWORD:?repository secret, see deploy/README.md}
+    networks:
+      - wallet-provider
+
+  provider:
+    container_name: eudiw-wallet-provider
+    # Pinned by the deploy workflow to a sha- tag, which names exactly one build.
+    # A branch tag would move under a running deployment.
+    image: ${WALLET_PROVIDER_IMAGE:?set by the deploy workflow}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keystore-init:
+        condition: service_completed_successfully
+    expose:
+      # Not published. nginx-proxy reaches this over proxy-net; nothing binds a
+      # host port except the proxy itself.
+      - "8080"
+    environment:
+      VIRTUAL_HOST: ${WALLET_PROVIDER_HOST:?set in stack.env}
+      VIRTUAL_PORT: "8080"
+      # VIRTUAL_DEST=/ strips the prefix, so the container still sees /jwks.
+      VIRTUAL_PATH: ${WALLET_PROVIDER_PATH:-/}
+      VIRTUAL_DEST: /
+      LETSENCRYPT_HOST: ${WALLET_PROVIDER_HOST}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL}
+
+      DATABASE_URL: r2dbc:pool:postgresql://postgres@postgres:5432/postgres
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?repository secret, see deploy/README.md}
+
+      SIGNINGKEY_KEYSTOREFILE: /keystore/keystore.jks
+      SIGNINGKEY_KEYSTOREPASSWORD: ${SIGNINGKEY_KEYSTOREPASSWORD:?repository secret, see deploy/README.md}
+      SIGNINGKEY_KEYSTORETYPE: JKS
+      SIGNINGKEY_KEYALIAS: signing_alias
+      SIGNINGKEY_KEYPASSWORD: ${SIGNINGKEY_KEYSTOREPASSWORD}
+      SIGNINGKEY_ALGORITHM: ES256
+
+      CLIENTID: ${CLIENTID:?set in stack.env}
+
+      # Signed into the wallet unit attestation as `iss` and validated by the
+      # wallet, so it must be the public name rather than the in-network one.
+      # https once the certificate is issued.
+      ISSUER_PUBLICURL: ${ISSUER_PUBLICURL:?set in stack.env}
+
+      KEYATTESTATION_CERTIFICATION: ${KEYATTESTATION_CERTIFICATION:?set in stack.env}
+      WALLETINSTANCEATTESTATION_WALLETNAME: ${WALLET_NAME:?set in stack.env}
+      WALLETINSTANCEATTESTATION_WALLETLINK: ${WALLET_LINK:?set in stack.env}
+      WALLETINSTANCEATTESTATION_WALLETVERSION: ${WALLET_VERSION:?set in stack.env}
+      WALLETINSTANCEATTESTATION_WALLETSOLUTIONCERTIFICATIONINFORMATION: ${WALLET_CERTIFICATION_INFO:?set in stack.env}
+
+      # Every attestation issued allocates an index on the status list, which is
+      # a shared service holding live data. The allocation is not reversible.
+      TOKENSTATUSLISTSERVICE_SERVICEURL: ${TOKENSTATUSLISTSERVICE_SERVICEURL:?set in stack.env}
+      TOKENSTATUSLISTSERVICE_APIKEY: ${TOKENSTATUSLISTSERVICE_APIKEY:?repository secret, see deploy/README.md}
+    volumes:
+      - signing-keystore:/keystore:ro
+    networks:
+      # Both: proxy-net for inbound traffic, wallet-provider to reach postgres.
+      - proxy-net
+      - wallet-provider
+
+configs:
+  # Requests that arrive without a known Host, which means direct to the IP or
+  # with a hostname we do not serve, get 444: nginx closes the connection with
+  # no response at all. The default is a 503, which tells a scanner something is
+  # here and worth probing further. ssl_reject_handshake does the same at the TLS
+  # layer, so an https probe does not even complete a handshake.
+  block-ip-access:
+    content: |
+      server {
+          listen 80 default_server;
+          listen [::]:80 default_server;
+          server_name _;
+          return 444;
+      }
+      server {
+          listen 443 ssl default_server;
+          listen [::]:443 ssl default_server;
+          server_name _;
+          ssl_reject_handshake on;
+          return 444;
+      }
+
+  # The platform key attestation endpoints take an X.509 chain from the Android
+  # keystore alongside a JWK set. Under nginx's 1m default a large one would get
+  # a 413 from the proxy before reaching the service, which reads as a client
+  # error rather than a proxy limit.
+  client-max-body-size:
+    content: |
+      client_max_body_size 4m;
+
+  init-sql:
+    content: |
+      CREATE TABLE IF NOT EXISTS challenges (id BIGSERIAL PRIMARY KEY, "value" bytea NOT NULL, created_at TIMESTAMP NOT NULL, expires_at TIMESTAMP NOT NULL, unused BOOLEAN NOT NULL);
+      ALTER TABLE challenges ADD CONSTRAINT challenges_value_unique_idx UNIQUE ("value");
+      CREATE SEQUENCE IF NOT EXISTS challenges_id_seq START WITH 1 MINVALUE 1 MAXVALUE 9223372036854775807;
+
+volumes:
+  proxy-certs:
+  proxy-vhost:
+  proxy-html:
+  proxy-conf:
+  acme-state:
+  postgres-data:
+  signing-keystore:
+
+networks:
+  # Created here and declared external by every other service repository.
+  proxy-net:
+    name: proxy-net
+  # Private to this stack.
+  wallet-provider:
+    name: eudiw-wallet-provider
