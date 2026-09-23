@@ -1,17 +1,10 @@
-# Production stack for the EC2 box, plus the shared edge.
+# The wallet provider, plus the shared edge. See deploy/README.md.
 #
-# Deployed by .github/workflows/docker-deploy.yml, which points a local compose
-# client at the remote daemon over SSH. The file itself never lands on the
-# server. To run it by hand:
+# Use deploy.sh or the Deploy workflow, not compose directly.
 #
-#   DOCKER_HOST=ssh://target docker compose \
-#     -f deploy/compose.yaml -p eudiw up -d
-#
-# This repository owns the edge for the whole deployment: nginx-proxy,
-# acme-companion and the proxy-net network are defined here and nowhere else.
-# Every other service repository declares proxy-net as external and adds only its
-# own containers, so this stack has to be up before anything else can be routed
-# or get a certificate.
+# This repository owns nginx-proxy, acme-companion and proxy-net, defined here
+# and nowhere else. Every other stack declares proxy-net external, so this one
+# must be up before anything else can be routed or get a certificate.
 
 name: eudiw
 
@@ -34,11 +27,8 @@ services:
       - proxy-html:/usr/share/nginx/html
       - proxy-conf:/etc/nginx/conf.d
     configs:
-      # Proxy-wide settings. nginx-proxy reads any .conf file in conf.d, and
-      # there is no environment variable for client_max_body_size. Inlined for
-      # the same reason as the database schema below: a bind mount would resolve
-      # on the remote filesystem, where Docker would create a directory of this
-      # name and nginx would fail to read it.
+      # Proxy-wide settings: nginx-proxy reads any .conf in conf.d, and there is
+      # no environment variable for client_max_body_size.
       - source: client-max-body-size
         target: /etc/nginx/conf.d/client-max-body-size.conf
       - source: block-ip-access
@@ -50,12 +40,8 @@ services:
     networks:
       - proxy-net
 
-  # Obtains and renews a Let's Encrypt certificate for every container that sets
-  # LETSENCRYPT_HOST, writing into the volumes nginx-proxy reads.
-  #
-  # Issues a certificate for every container that sets LETSENCRYPT_HOST. The
-  # HTTP-01 challenge is resolved from public DNS, so the name has to point at
-  # this box.
+  # A certificate per LETSENCRYPT_HOST, written into the volumes nginx-proxy
+  # reads. HTTP-01 resolves from public DNS, so the name must point at this box.
   acme-companion:
     image: nginxproxy/acme-companion:2.8
     container_name: nginx-proxy-acme
@@ -90,12 +76,8 @@ services:
       # makes the entrypoint refuse to start.
       - postgres-data:/var/lib/postgresql
     configs:
-      # schemas/postgresql/V1.sql, inlined. A bind mount cannot be used here:
-      # compose sends paths to the daemon verbatim, and over DOCKER_HOST=ssh://
-      # they resolve on the remote filesystem, where the repository does not
-      # exist. Docker would create an empty directory and postgres would
-      # initialise with no schema, which the service then refuses to start
-      # against. Keep in sync with schemas/postgresql/V1.sql.
+      # schemas/postgresql/V1.sql, inlined: a bind mount would resolve on the
+      # remote filesystem under DOCKER_HOST=ssh://. Keep the two in sync.
       - source: init-sql
         target: /docker-entrypoint-initdb.d/V1.sql
     healthcheck:
@@ -111,9 +93,8 @@ services:
 
   # Generates the JWT signing keystore into a named volume on first deploy.
   #
-  # Skips if the keystore exists, which matters more here than locally: the
-  # public key is published at /jwks and is what verifies every attestation this
-  # service has issued. Regenerating it invalidates all of them.
+  # Skips if the keystore exists. Its public key is published at /jwks and
+  # verifies every attestation issued, so regenerating it invalidates them all.
   keystore-init:
     image: eclipse-temurin:25-jdk
     container_name: eudiw-wallet-provider-keystore-init
@@ -209,17 +190,13 @@ services:
       - wallet-provider
 
 configs:
-  # RFC 8414 puts discovery metadata at the host root regardless of the issuer's
-  # path: a client asking about https://host/issuer fetches
-  # https://host/.well-known/oauth-authorization-server/issuer. The issuer and
-  # the OIDC server both serve these at their own root, and on this hostname the
-  # root belongs to the status list, so without these rules the wallet gets its
-  # 404 instead.
+  # RFC 8414 puts discovery metadata at the host root regardless of a service's
+  # path, and on this hostname the root belongs to the status list. Without these
+  # rules a wallet gets its 404 instead. See deploy/README.md.
   #
-  # Upstream names are <host>-<sha1 of VIRTUAL_PATH>, which is how nginx-proxy
-  # generates them for a path-routed container. Safe to deploy before the issuer
-  # exists: nginx treats an unknown upstream name as a hostname resolved per
-  # request, so these return 502 until it does rather than failing to start.
+  # Upstream names are <host>-<sha1 of VIRTUAL_PATH>. Safe to deploy before the
+  # target exists: nginx resolves an unknown upstream per request, so these
+  # return 502 rather than failing to start.
   well-known-discovery:
     content: |
       # /issuer  -> sha1("/issuer/")
@@ -230,12 +207,14 @@ configs:
       location ~ ^/\.well-known/(openid-configuration|oauth-authorization-server)/auth$ {
           proxy_pass http://demo.eudiw.grnet.gr-a66bfb0225a60bc5c64465d6cd63a199dfe15217/.well-known/$1;
       }
+      # /frontend  -> sha1("/frontend/"). It serves signed metadata under its
+      # own identity, so it is a credential issuer for discovery purposes.
+      location ~ ^/\.well-known/(openid-credential-issuer)/frontend$ {
+          proxy_pass http://demo.eudiw.grnet.gr-cf70a67df60bdc2f86a0213e390eaf0a1185538d/.well-known/$1;
+      }
 
-  # Requests that arrive without a known Host, which means direct to the IP or
-  # with a hostname we do not serve, get 444: nginx closes the connection with
-  # no response at all. The default is a 503, which tells a scanner something is
-  # here and worth probing further. ssl_reject_handshake does the same at the TLS
-  # layer, so an https probe does not even complete a handshake.
+  # Requests without a known Host get 444, nginx closing the connection with no
+  # response. The default 503 tells a scanner something is here worth probing.
   block-ip-access:
     content: |
       server {
