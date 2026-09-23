@@ -43,6 +43,10 @@ services:
         target: /etc/nginx/conf.d/client-max-body-size.conf
       - source: block-ip-access
         target: /etc/nginx/conf.d/block-ip-access.conf
+      # Per-vhost, server-block scope. Adds locations rather than modifying
+      # generated ones, which is what the plain <host> file is for.
+      - source: well-known-discovery
+        target: /etc/nginx/vhost.d/demo.eudiw.grnet.gr
     networks:
       - proxy-net
 
@@ -205,6 +209,28 @@ services:
       - wallet-provider
 
 configs:
+  # RFC 8414 puts discovery metadata at the host root regardless of the issuer's
+  # path: a client asking about https://host/issuer fetches
+  # https://host/.well-known/oauth-authorization-server/issuer. The issuer and
+  # the OIDC server both serve these at their own root, and on this hostname the
+  # root belongs to the status list, so without these rules the wallet gets its
+  # 404 instead.
+  #
+  # Upstream names are <host>-<sha1 of VIRTUAL_PATH>, which is how nginx-proxy
+  # generates them for a path-routed container. Safe to deploy before the issuer
+  # exists: nginx treats an unknown upstream name as a hostname resolved per
+  # request, so these return 502 until it does rather than failing to start.
+  well-known-discovery:
+    content: |
+      # /issuer  -> sha1("/issuer/")
+      location ~ ^/\.well-known/(openid-credential-issuer|openid-configuration|oauth-authorization-server)/issuer$ {
+          proxy_pass http://demo.eudiw.grnet.gr-63f4327c3fa4d49abd74fe2d0bd693119ac65aa7/.well-known/$1;
+      }
+      # /auth  -> sha1("/auth/")
+      location ~ ^/\.well-known/(openid-configuration|oauth-authorization-server)/auth$ {
+          proxy_pass http://demo.eudiw.grnet.gr-a66bfb0225a60bc5c64465d6cd63a199dfe15217/.well-known/$1;
+      }
+
   # Requests that arrive without a known Host, which means direct to the IP or
   # with a hostname we do not serve, get 444: nginx closes the connection with
   # no response at all. The default is a 503, which tells a scanner something is
