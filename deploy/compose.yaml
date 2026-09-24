@@ -33,6 +33,10 @@ services:
         target: /etc/nginx/conf.d/client-max-body-size.conf
       - source: block-ip-access
         target: /etc/nginx/conf.d/block-ip-access.conf
+      # Replaces the generated port-80 server for the host. The 00- prefix is
+      # load-bearing: nginx keeps the first server with a given name and port.
+      - source: http-with-crl-exception
+        target: /etc/nginx/conf.d/00-http-with-crl-exception.conf
       # Per-vhost, server-block scope. Adds locations rather than modifying
       # generated ones, which is what the plain <host> file is for.
       - source: well-known-discovery
@@ -206,7 +210,6 @@ configs:
   verifier-ui-base-href:
     content: |
       sub_filter '<base href="/">' '<base href="/verifier-ui/">';
-      sub_filter_types text/html;
       sub_filter_once off;
 
   # The issuer frontend's templates use url_for('static'), 140 times, which is
@@ -223,7 +226,6 @@ configs:
     content: |
       sub_filter 'href="/static/' 'href="/frontend/static/';
       sub_filter 'src="/static/' 'src="/frontend/static/';
-      sub_filter_types text/html;
       sub_filter_once off;
 
   # RFC 8414 puts discovery metadata at the host root regardless of a service's
@@ -265,6 +267,52 @@ configs:
           server_name _;
           ssl_reject_handshake on;
           return 444;
+      }
+
+  # The IACA names http://<host>/revocation/crl.pem as its CRL distribution
+  # point. Plain http is normal for CRLs, and a JVM verifier will not follow an
+  # http to https redirect, so that one path must answer on port 80.
+  #
+  # nginx-proxy cannot express this. HTTPS_METHOD is per hostname, not per path,
+  # so noredirect on the CRL container would drop the redirect and HSTS for every
+  # service here, and the generated port-80 server has no include hook. So this
+  # replaces it: loaded before default.conf, it is the server nginx keeps, and
+  # the generated one is ignored with a "conflicting server name" warning.
+  #
+  # It must keep doing what the generated one did. The ACME location is copied
+  # verbatim from nginx-proxy 1.11's template: without it certificate renewal
+  # fails, silently, weeks later. Recheck it when upgrading nginx-proxy.
+  #
+  # The upstream resolves per request through Docker's DNS, so a missing CRL
+  # container is a 502 on this path rather than an nginx that will not start.
+  # eudiw-crl is its container_name in eudi-srv-web-issuing-eudiw-py; CRL_PATH
+  # must match that stack's.
+  http-with-crl-exception:
+    content: |
+      server {
+          listen 80;
+          server_name ${EDGE_HOST};
+          access_log /var/log/nginx/access.log;
+
+          location ^~ /.well-known/acme-challenge/ {
+              auth_basic off;
+              auth_request off;
+              allow all;
+              root /usr/share/nginx/html;
+              try_files $$uri =404;
+              break;
+          }
+
+          location ^~ ${CRL_PATH:?set in stack.env} {
+              resolver 127.0.0.11 valid=30s;
+              set $$crl_upstream http://eudiw-crl;
+              proxy_pass $$crl_upstream;
+              proxy_set_header Host $$host;
+          }
+
+          location / {
+              return 301 https://$$host$$request_uri;
+          }
       }
 
   # The platform key attestation endpoints take an X.509 chain from the Android
