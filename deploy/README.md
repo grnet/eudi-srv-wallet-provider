@@ -106,6 +106,41 @@ prefixed value. The status list used to be harder, building its URL from a
 hardcoded Python constant, but it now reads `SERVICE_URL` from the environment.
 See `WEBUILD/DOCKER.md`.
 
+## This stack carries routing fixes for other services
+
+nginx-proxy and the `proxy-vhost` volume belong here, so per-path nginx config
+for *any* service on this hostname is declared in this compose file. Three
+`configs:` entries exist for that reason, and none of them is about the wallet
+provider:
+
+| Config | For | Why |
+| --- | --- | --- |
+| `well-known-discovery` | issuer, OIDC, issuer frontend | RFC 8414 puts discovery metadata at the host root, which belongs to the status list |
+| `verifier-ui-base-href` | verifier UI | Angular bakes `<base href="/">`, so assets resolve to the host root |
+| `issuer-frontend-static` | issuer frontend | Flask `url_for('static')` emits absolute `/static/...`, same effect |
+
+Keeping them here means those forks carry no deployment-specific changes.
+`eudi-web-verifier` in particular has **zero drift from upstream**.
+
+The cost is that a service's routing can live in a different repository from the
+service, and that this stack must be deployed before the ones that depend on it.
+
+### Per-path config files, and the trap
+
+Named `<host>_<sha1 of VIRTUAL_PATH>_location`, where the hash has **no trailing
+newline**:
+
+    printf '%s' '/frontend/' | shasum
+
+A hash matching no generated location is silently ignored. Nothing errors, and
+the page is simply broken.
+
+**Adding one needs the proxy recreated, not reloaded.** docker-gen writes the
+`include` line only when the file exists at template-generation time, so
+dropping a file in and running `nginx -s reload` does nothing at all. Use
+`RECREATE=1 ./deploy.sh`. The same applies to changing a config's *content*:
+compose does not recreate a container when only that changed.
+
 ## Still to sort
 
 - The DNS record, and TLS with it.
