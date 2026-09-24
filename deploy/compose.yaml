@@ -37,6 +37,9 @@ services:
       # generated ones, which is what the plain <host> file is for.
       - source: well-known-discovery
         target: /etc/nginx/vhost.d/demo.eudiw.grnet.gr
+      # Per-VIRTUAL_PATH, inside one location. Named <host>_<sha1 of path>_location.
+      - source: verifier-ui-base-href
+        target: /etc/nginx/vhost.d/demo.eudiw.grnet.gr_fd64cf69ae9646446b46d190dd78629487e3be2f_location
     networks:
       - proxy-net
 
@@ -190,6 +193,20 @@ services:
       - wallet-provider
 
 configs:
+  # The verifier UI is an Angular SPA: it emits relative asset paths and a
+  # <base href="/">, so behind /verifier-ui/ the browser would fetch every
+  # stylesheet and script from the host root, which is the status list. The page
+  # returns 200 and renders blank.
+  #
+  # Rewritten here rather than in eudi-web-verifier so that fork keeps zero
+  # drift from upstream: the alternatives both need a change to its Dockerfile.
+  # sha1("/verifier-ui/") = fd64cf69ae9646446b46d190dd78629487e3be2f
+  verifier-ui-base-href:
+    content: |
+      sub_filter '<base href="/">' '<base href="/verifier-ui/">';
+      sub_filter_types text/html;
+      sub_filter_once off;
+
   # RFC 8414 puts discovery metadata at the host root regardless of a service's
   # path, and on this hostname the root belongs to the status list. Without these
   # rules a wallet gets its 404 instead. See deploy/README.md.
