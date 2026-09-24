@@ -181,16 +181,26 @@ jobs:
           fi
 
           # Through the proxy, by Host header, so this exercises the vhost rather
-          # than the container directly.
+          # than the container directly. The path carries WALLET_PROVIDER_PATH:
+          # the service moved off the host root when the status list took it.
+          #
+          # Retried, because the JVM takes a few seconds past `up -d` before it
+          # answers and a 502 in that window is a slow start, not a bad deploy.
           echo "── service answers through the proxy ──"
           host=$(grep -E '^WALLET_PROVIDER_HOST=' deploy/stack.env | cut -d= -f2)
-          code=$(docker run --rm --network proxy-net curlimages/curl:8.11.1 \
-                   -s -o /dev/null -w '%{http_code}' --max-time 10 \
-                   -H "Host: $host" http://nginx-proxy/jwks || echo 000)
+          path=$(grep -E '^WALLET_PROVIDER_PATH=' deploy/stack.env | cut -d= -f2)
+          code=000
+          for _ in $(seq 1 12); do
+            code=$(docker run --rm --network proxy-net curlimages/curl:8.11.1 \
+                     -s -o /dev/null -w '%{http_code}' --max-time 10 \
+                     -H "Host: $host" "http://nginx-proxy${path}jwks" || echo 000)
+            [[ "$code" == "200" ]] && break
+            sleep 5
+          done
           if [[ "$code" == "200" ]]; then
-            echo "  ok   /jwks returned 200"
+            echo "  ok   ${path}jwks returned 200"
           else
-            echo "  FAIL /jwks returned $code"
+            echo "  FAIL ${path}jwks returned $code"
             fail=1
           fi
 
