@@ -40,6 +40,8 @@ services:
       # Per-VIRTUAL_PATH, inside one location. Named <host>_<sha1 of path>_location.
       - source: verifier-ui-base-href
         target: /etc/nginx/vhost.d/demo.eudiw.grnet.gr_fd64cf69ae9646446b46d190dd78629487e3be2f_location
+      - source: issuer-frontend-static
+        target: /etc/nginx/vhost.d/demo.eudiw.grnet.gr_cf70a67df60bdc2f86a0213e390eaf0a1185538d_location
     networks:
       - proxy-net
 
@@ -204,6 +206,23 @@ configs:
   verifier-ui-base-href:
     content: |
       sub_filter '<base href="/">' '<base href="/verifier-ui/">';
+      sub_filter_types text/html;
+      sub_filter_once off;
+
+  # The issuer frontend's templates use url_for('static'), 140 times, which is
+  # correct Flask. But nothing tells the app it lives under /frontend/, so
+  # url_for emits absolute /static/... and the browser drops the prefix,
+  # hitting the status list at the root. Every stylesheet, script and image
+  # 404s while the page itself returns 200.
+  #
+  # The app-side fix is SCRIPT_NAME or ProxyFix in the WSGI stack; it ignores an
+  # X-Script-Name header today, verified. Rewriting here keeps that fork free of
+  # deployment-specific changes, as with the verifier UI above.
+  # sha1("/frontend/") = cf70a67df60bdc2f86a0213e390eaf0a1185538d
+  issuer-frontend-static:
+    content: |
+      sub_filter 'href="/static/' 'href="/frontend/static/';
+      sub_filter 'src="/static/' 'src="/frontend/static/';
       sub_filter_types text/html;
       sub_filter_once off;
 
