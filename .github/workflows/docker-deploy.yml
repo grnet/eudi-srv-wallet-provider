@@ -204,6 +204,32 @@ jobs:
             fail=1
           fi
 
+          # Port 80 is this stack's own server block, not nginx-proxy's, so
+          # check it still does what the generated one did: redirect, and serve
+          # ACME challenges. A broken ACME location fails only at the next
+          # renewal, weeks later, so probe it with a file of our own.
+          echo "── port 80 ──"
+          http() {
+            docker run --rm --network proxy-net curlimages/curl:8.11.1 \
+              -s --max-time 10 -H "Host: $host" "http://nginx-proxy$1" "${@:2}" || echo 000
+          }
+          code=$(http "${path}jwks" -o /dev/null -w '%{http_code}')
+          if [[ "$code" == "301" ]]; then
+            echo "  ok   http redirects to https"
+          else
+            echo "  FAIL http ${path}jwks returned $code, expected 301"
+            fail=1
+          fi
+          probe="deploy-probe-${GITHUB_RUN_ID}"
+          docker exec nginx-proxy sh -c "mkdir -p /usr/share/nginx/html/.well-known/acme-challenge && echo $probe > /usr/share/nginx/html/.well-known/acme-challenge/$probe"
+          if [[ "$(http "/.well-known/acme-challenge/$probe")" == "$probe" ]]; then
+            echo "  ok   ACME challenge served over http"
+          else
+            echo "  FAIL ACME challenge not served: certificate renewal will fail"
+            fail=1
+          fi
+          docker exec nginx-proxy rm -f "/usr/share/nginx/html/.well-known/acme-challenge/$probe"
+
           [[ "$fail" -eq 0 ]] && echo "deploy verified" || { echo "verification failed"; exit 1; }
 
       - name: Clean up
