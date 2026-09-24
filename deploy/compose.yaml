@@ -241,15 +241,21 @@ configs:
       location ~ ^/\.well-known/(openid-credential-issuer|openid-configuration|oauth-authorization-server)/issuer$ {
           proxy_pass http://${EDGE_HOST}-63f4327c3fa4d49abd74fe2d0bd693119ac65aa7/.well-known/$1;
       }
-      # /auth  -> sha1("/auth/")
-      location ~ ^/\.well-known/(openid-configuration|oauth-authorization-server)/auth$ {
-          proxy_pass http://${EDGE_HOST}-a66bfb0225a60bc5c64465d6cd63a199dfe15217/.well-known/$1;
+      # /issuer/oidc  -> sha1("/issuer/oidc/"). The authorization server,
+      # nested under the issuer because upstream assumes <issuer>/oidc.
+      location ~ ^/\.well-known/(openid-configuration|oauth-authorization-server)/issuer/oidc$ {
+          proxy_pass http://${EDGE_HOST}-21f4678fd8adba8903ca9c631d21ba6ce9802c0c/.well-known/$1;
       }
       # /frontend  -> sha1("/frontend/"). It serves signed metadata under its
-      # own identity, so it is a credential issuer for discovery purposes.
-      location ~ ^/\.well-known/(openid-credential-issuer)/frontend$ {
+      # own identity, so it is a credential issuer for discovery purposes, and
+      # it is its own authorization server too: no authorization_servers, and
+      # issuer = <frontend> in its AS metadata. So all three forms, as /issuer.
+      location ~ ^/\.well-known/(openid-credential-issuer|openid-configuration|oauth-authorization-server)/frontend$ {
           proxy_pass http://${EDGE_HOST}-cf70a67df60bdc2f86a0213e390eaf0a1185538d/.well-known/$1;
       }
+      # No resolver needed, and a missing upstream does not stop nginx loading:
+      # the $1 makes each proxy_pass variable, so the name is looked up per
+      # request, among nginx-proxy's upstream groups first. Checked 2026-09-24.
 
   # Requests without a known Host get 444, nginx closing the connection with no
   # response. The default 503 tells a scanner something is here worth probing.
