@@ -1,0 +1,462 @@
+# The wallet provider, plus the shared edge. See deploy/README.md.
+#
+# Use deploy.sh or the Deploy workflow, not compose directly.
+#
+# This repository owns nginx-proxy, acme-companion and proxy-net, defined here
+# and nowhere else. Every other stack declares proxy-net external, so this one
+# must be up before anything else can be routed or get a certificate.
+
+name: eudiw
+
+services:
+
+  # Watches the Docker socket and writes an nginx vhost for every container that
+  # sets VIRTUAL_HOST. The only container in the deployment that publishes ports.
+  nginx-proxy:
+    image: nginxproxy/nginx-proxy:1.11-alpine
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Read-only: docker-gen only needs to watch events.
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - proxy-certs:/etc/nginx/certs
+      - proxy-vhost:/etc/nginx/vhost.d
+      - proxy-html:/usr/share/nginx/html
+      - proxy-conf:/etc/nginx/conf.d
+    configs:
+      # Proxy-wide settings: nginx-proxy reads any .conf in conf.d, and there is
+      # no environment variable for client_max_body_size.
+      - source: client-max-body-size
+        target: /etc/nginx/conf.d/client-max-body-size.conf
+      - source: block-ip-access
+        target: /etc/nginx/conf.d/block-ip-access.conf
+      # Replaces the generated port-80 server for the host. The 00- prefix is
+      # load-bearing: nginx keeps the first server with a given name and port.
+      - source: http-with-crl-exception
+        target: /etc/nginx/conf.d/00-http-with-crl-exception.conf
+      # Per-vhost, server-block scope. Adds locations rather than modifying
+      # generated ones, which is what the plain <host> file is for.
+      - source: well-known-discovery
+        target: /etc/nginx/vhost.d/${EDGE_HOST:?set in stack.env}
+      # Per-VIRTUAL_PATH, inside one location. Named <host>_<sha1 of path>_location.
+      - source: verifier-ui-base-href
+        target: /etc/nginx/vhost.d/${EDGE_HOST}_fd64cf69ae9646446b46d190dd78629487e3be2f_location
+      - source: issuer-frontend-static
+        target: /etc/nginx/vhost.d/${EDGE_HOST}_cf70a67df60bdc2f86a0213e390eaf0a1185538d_location
+    networks:
+      - proxy-net
+
+  # A certificate per LETSENCRYPT_HOST, written into the volumes nginx-proxy
+  # reads. HTTP-01 resolves from public DNS, so the name must point at this box.
+  acme-companion:
+    image: nginxproxy/acme-companion:2.8
+    container_name: nginx-proxy-acme
+    restart: unless-stopped
+    depends_on:
+      - nginx-proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - proxy-certs:/etc/nginx/certs
+      - proxy-vhost:/etc/nginx/vhost.d
+      - proxy-html:/usr/share/nginx/html
+      - proxy-conf:/etc/nginx/conf.d
+      - acme-state:/etc/acme.sh
+    environment:
+      NGINX_PROXY_CONTAINER: nginx-proxy
+      DEFAULT_EMAIL: ${LETSENCRYPT_EMAIL:?set in stack.env}
+      # Point at the staging CA while iterating; its rate limits are far higher
+      # and its certificates are not publicly trusted.
+      # ACME_CA_URI: https://acme-staging-v02.api.letsencrypt.org/directory
+    networks:
+      - proxy-net
+
+  postgres:
+    image: postgres:18.3-alpine
+    container_name: eudiw-wallet-provider-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?repository secret, see deploy/README.md}
+    volumes:
+      # Postgres 18 wants a single mount at /var/lib/postgresql and puts the data
+      # in a subdirectory. Mounting /var/lib/postgresql/data, correct up to 17,
+      # makes the entrypoint refuse to start.
+      - postgres-data:/var/lib/postgresql
+    configs:
+      # schemas/postgresql/V1.sql, inlined: a bind mount would resolve on the
+      # remote filesystem under DOCKER_HOST=ssh://. Keep the two in sync.
+      - source: init-sql
+        target: /docker-entrypoint-initdb.d/V1.sql
+    healthcheck:
+      # CMD, not CMD-SHELL: the shell form takes a single string and drops the
+      # remaining arguments, leaving pg_isready to connect as "root".
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - wallet-provider
+
+  # Generates the JWT signing keystore into a named volume on first deploy.
+  #
+  # Skips if the keystore exists. Its public key is published at /jwks and
+  # verifies every attestation issued, so regenerating it invalidates them all.
+  keystore-init:
+    image: eclipse-temurin:25-jdk
+    container_name: eudiw-wallet-provider-keystore-init
+    volumes:
+      - signing-keystore:/keystore
+    command:
+      - sh
+      - -euc
+      - |
+        if [ -f /keystore/keystore.jks ]; then
+          echo "keystore.jks exists, leaving it alone"
+          exit 0
+        fi
+        echo "generating signing keystore"
+        cd /tmp
+        openssl ecparam -name prime256v1 -genkey -noout -out signing_key.pem
+        openssl req -new -x509 -sha256 -days 365 \
+          -key signing_key.pem -out signing_cert.pem \
+          -subj "/C=GR/ST=Athens/L=Attica/O=GRNET/CN=GRNET Wallet Backend Signer" \
+          -addext "basicConstraints=critical,CA:FALSE" \
+          -addext "keyUsage=critical,digitalSignature" \
+          -addext "subjectKeyIdentifier=hash"
+        openssl pkcs12 -export -in signing_cert.pem -inkey signing_key.pem \
+          -name signing_alias -out out.p12 -passout pass:"$${SIGNINGKEY_KEYSTOREPASSWORD}"
+        keytool -importkeystore -noprompt \
+          -srckeystore out.p12 -srcstoretype PKCS12 \
+          -srcstorepass "$${SIGNINGKEY_KEYSTOREPASSWORD}" \
+          -destkeystore /keystore/keystore.jks -deststoretype JKS \
+          -deststorepass "$${SIGNINGKEY_KEYSTOREPASSWORD}"
+        chmod 644 /keystore/keystore.jks
+        echo "done"
+    environment:
+      SIGNINGKEY_KEYSTOREPASSWORD: ${SIGNINGKEY_KEYSTOREPASSWORD:?repository secret, see deploy/README.md}
+    networks:
+      - wallet-provider
+
+  provider:
+    container_name: eudiw-wallet-provider
+    # Pinned by the deploy workflow to a sha- tag, which names exactly one build.
+    # A branch tag would move under a running deployment.
+    image: ${WALLET_PROVIDER_IMAGE:?set by the deploy workflow}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keystore-init:
+        condition: service_completed_successfully
+    expose:
+      # Not published. nginx-proxy reaches this over proxy-net; nothing binds a
+      # host port except the proxy itself.
+      - "8080"
+    environment:
+      VIRTUAL_HOST: ${WALLET_PROVIDER_HOST:?set in stack.env}
+      VIRTUAL_PORT: "8080"
+      # VIRTUAL_DEST=/ strips the prefix, so the container still sees /jwks.
+      VIRTUAL_PATH: ${WALLET_PROVIDER_PATH:-/}
+      VIRTUAL_DEST: /
+      LETSENCRYPT_HOST: ${WALLET_PROVIDER_HOST}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL}
+
+      DATABASE_URL: r2dbc:pool:postgresql://postgres@postgres:5432/postgres
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?repository secret, see deploy/README.md}
+
+      SIGNINGKEY_KEYSTOREFILE: /keystore/keystore.jks
+      SIGNINGKEY_KEYSTOREPASSWORD: ${SIGNINGKEY_KEYSTOREPASSWORD:?repository secret, see deploy/README.md}
+      SIGNINGKEY_KEYSTORETYPE: JKS
+      SIGNINGKEY_KEYALIAS: signing_alias
+      SIGNINGKEY_KEYPASSWORD: ${SIGNINGKEY_KEYSTOREPASSWORD}
+      SIGNINGKEY_ALGORITHM: ES256
+
+      CLIENTID: ${CLIENTID:?set in stack.env}
+
+      # Signed into the wallet unit attestation as `iss` and validated by the
+      # wallet, so it must be the public name rather than the in-network one.
+      # https once the certificate is issued.
+      ISSUER_PUBLICURL: ${ISSUER_PUBLICURL:?set in stack.env}
+
+      KEYATTESTATION_CERTIFICATION: ${KEYATTESTATION_CERTIFICATION:?set in stack.env}
+      WALLETINSTANCEATTESTATION_WALLETNAME: ${WALLET_NAME:?set in stack.env}
+      WALLETINSTANCEATTESTATION_WALLETLINK: ${WALLET_LINK:?set in stack.env}
+      WALLETINSTANCEATTESTATION_WALLETVERSION: ${WALLET_VERSION:?set in stack.env}
+      WALLETINSTANCEATTESTATION_WALLETSOLUTIONCERTIFICATIONINFORMATION: ${WALLET_CERTIFICATION_INFO:?set in stack.env}
+
+      # Every attestation issued allocates an index on the status list, which is
+      # a shared service holding live data. The allocation is not reversible.
+      TOKENSTATUSLISTSERVICE_SERVICEURL: ${TOKENSTATUSLISTSERVICE_SERVICEURL:?set in stack.env}
+      TOKENSTATUSLISTSERVICE_APIKEY: ${TOKENSTATUSLISTSERVICE_APIKEY:?repository secret, see deploy/README.md}
+    volumes:
+      - signing-keystore:/keystore:ro
+    networks:
+      # Both: proxy-net for inbound traffic, wallet-provider to reach postgres.
+      - proxy-net
+      - wallet-provider
+
+  # The demo's front door at the hostname root: what is here, where to start,
+  # and what a partner needs to trust it. One static page, no JavaScript.
+  #
+  # Here because it describes the routes this stack's edge defines, so the two
+  # change together. The root used to be the status list's, which never used
+  # it; that stack now holds only /token_status_list and /identifier_list.
+  landing:
+    image: nginx:1.29.1-alpine
+    container_name: eudiw-landing
+    restart: unless-stopped
+    expose:
+      - "80"
+    environment:
+      VIRTUAL_HOST: ${EDGE_HOST}
+      VIRTUAL_PORT: "80"
+      # Catches everything no other service claims, so unknown paths get this
+      # container's plain 404 rather than someone else's.
+      VIRTUAL_PATH: /
+      LETSENCRYPT_HOST: ${EDGE_HOST}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL}
+    configs:
+      - source: landing-html
+        target: /usr/share/nginx/html/index.html
+      - source: landing-nginx
+        target: /etc/nginx/conf.d/default.conf
+    networks:
+      - proxy-net
+
+configs:
+  # Every link is relative, so nothing here names the host. The fingerprint is
+  # IACA_SHA256 in stack.env; deploy.sh fails if it does not match the
+  # certificate actually served at /pki/.
+  landing-html:
+    content: |
+      <!doctype html>
+      <html lang="en">
+      <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>EUDI Wallet demo · GRNET</title>
+      <style>
+        body { font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; max-width: 46rem; margin: 3rem auto; padding: 0 1.25rem; color: #1b1f24; }
+        h1 { font-size: 1.6rem; margin-bottom: .25rem; }
+        h2 { font-size: 1.1rem; margin-top: 2.25rem; border-bottom: 1px solid #d8dee4; padding-bottom: .3rem; }
+        p.lead { color: #57606a; margin-top: 0; }
+        table { border-collapse: collapse; width: 100%; }
+        td { padding: .45rem .5rem .45rem 0; vertical-align: top; border-bottom: 1px solid #eef1f4; }
+        td:first-child { white-space: nowrap; padding-right: 1.25rem; }
+        code { font: .88em ui-monospace, SFMono-Regular, Menlo, monospace; background: #f3f5f7; padding: .1em .3em; border-radius: 3px; word-break: break-all; }
+        a { color: #0550ae; }
+        footer { margin-top: 3rem; color: #57606a; font-size: .9rem; }
+        @media (prefers-color-scheme: dark) {
+          body { background: #0d1117; color: #e6edf3; } p.lead, footer { color: #8d96a0; }
+          h2 { border-color: #30363d; } td { border-color: #21262d; } code { background: #161b22; } a { color: #4493f8; }
+        }
+      </style>
+      </head>
+      <body>
+      <h1>EUDI Wallet demo</h1>
+      <p class="lead">GRNET's deployment of the EU Digital Identity Wallet reference services, for WE BUILD.</p>
+
+      <h2>Try it</h2>
+      <table>
+        <tr><td><a href="/frontend/">Issuer frontend</a></td><td>Request a PID into your wallet.</td></tr>
+        <tr><td><a href="/verifier-ui/">Verifier UI</a></td><td>Ask a wallet to present credentials, as a relying party would.</td></tr>
+      </table>
+
+      <h2>Services</h2>
+      <table>
+        <tr><td><a href="/issuer/">PID issuer</a></td><td>OpenID4VCI credential issuer. Metadata at <a href="/.well-known/openid-credential-issuer/issuer"><code>/.well-known/openid-credential-issuer/issuer</code></a>.</td></tr>
+        <tr><td><a href="/issuer/oidc/">Authorization server</a></td><td>OAuth for the issuer. Metadata at <a href="/.well-known/oauth-authorization-server/issuer/oidc"><code>/.well-known/oauth-authorization-server/issuer/oidc</code></a>.</td></tr>
+        <tr><td><a href="/token_status_list/swagger/">Status list</a></td><td>Revocation status of issued credentials and attestations.</td></tr>
+        <tr><td><a href="/wallet-provider/jwks">Wallet provider</a></td><td>Wallet instance and key attestations. Its signing keys.</td></tr>
+        <tr><td><a href="/verifier/wallet/public-keys.json">Verifier backend</a></td><td>OpenID4VP. The key its request objects are signed with.</td></tr>
+      </table>
+
+      <h2>Trusting this issuer</h2>
+      <p>Credentials from this demo chain to GRNET's IACA. Configure it as a trust anchor, and check the fingerprint of what you downloaded against the one below.</p>
+      <table>
+        <tr><td><a href="/pki/root-ca-grnet.pem">IACA certificate</a></td><td><code>CN=PID Issuer CA - GR 01, O=GRNET, C=GR</code></td></tr>
+        <tr><td>SHA-256</td><td><code>${IACA_SHA256:?set in stack.env}</code></td></tr>
+        <tr><td><a href="/revocation/crl.pem">Revocation list</a></td><td>The CRL named in the certificate, DER-encoded. Certificates point at it over plain http, which is normal for CRLs: the list itself is signed.</td></tr>
+      </table>
+
+      <h2>Wallet app</h2>
+      <p>The Android build of the wallet is shared with partners directly for now. A download will appear here once it is published.</p>
+
+      <footer><strong>Demo services - Test data only.</strong> Operated by GRNET.</footer>
+      </body>
+      </html>
+
+  # Serves the page and nothing else: every other path is a plain 404, since
+  # this is the catch-all for the hostname. No scripts, so the policy can be
+  # strict.
+  landing-nginx:
+    content: |
+      server {
+          listen 80;
+          root /usr/share/nginx/html;
+          add_header Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'" always;
+          add_header X-Content-Type-Options nosniff always;
+          add_header Referrer-Policy no-referrer always;
+          location = / {
+              try_files /index.html =404;
+          }
+          location / {
+              return 404;
+          }
+      }
+
+  # The verifier UI is an Angular SPA: it emits relative asset paths and a
+  # <base href="/">, so behind /verifier-ui/ the browser would fetch every
+  # stylesheet and script from the host root, which is the status list. The page
+  # returns 200 and renders blank.
+  #
+  # Rewritten here rather than in eudi-web-verifier so that fork keeps zero
+  # drift from upstream: the alternatives both need a change to its Dockerfile.
+  # sha1("/verifier-ui/") = fd64cf69ae9646446b46d190dd78629487e3be2f
+  verifier-ui-base-href:
+    content: |
+      sub_filter '<base href="/">' '<base href="/verifier-ui/">';
+      sub_filter_once off;
+
+  # The issuer frontend's templates use url_for('static'), 140 times, which is
+  # correct Flask. But nothing tells the app it lives under /frontend/, so
+  # url_for emits absolute /static/... and the browser drops the prefix,
+  # hitting the status list at the root. Every stylesheet, script and image
+  # 404s while the page itself returns 200.
+  #
+  # The app-side fix is SCRIPT_NAME or ProxyFix in the WSGI stack; it ignores an
+  # X-Script-Name header today, verified. Rewriting here keeps that fork free of
+  # deployment-specific changes, as with the verifier UI above.
+  # sha1("/frontend/") = cf70a67df60bdc2f86a0213e390eaf0a1185538d
+  issuer-frontend-static:
+    content: |
+      sub_filter 'href="/static/' 'href="/frontend/static/';
+      sub_filter 'src="/static/' 'src="/frontend/static/';
+      sub_filter_once off;
+
+  # RFC 8414 puts discovery metadata at the host root regardless of a service's
+  # path, and on this hostname the root belongs to the status list. Without these
+  # rules a wallet gets its 404 instead. See deploy/README.md.
+  #
+  # Upstream names are <host>-<sha1 of VIRTUAL_PATH>. Safe to deploy before the
+  # target exists: nginx resolves an unknown upstream per request, so these
+  # return 502 rather than failing to start.
+  well-known-discovery:
+    content: |
+      # /issuer  -> sha1("/issuer/")
+      location ~ ^/\.well-known/(openid-credential-issuer|openid-configuration|oauth-authorization-server)/issuer$ {
+          proxy_pass http://${EDGE_HOST}-63f4327c3fa4d49abd74fe2d0bd693119ac65aa7/.well-known/$1;
+      }
+      # /issuer/oidc  -> sha1("/issuer/oidc/"). The authorization server,
+      # nested under the issuer because upstream assumes <issuer>/oidc.
+      location ~ ^/\.well-known/(openid-configuration|oauth-authorization-server)/issuer/oidc$ {
+          proxy_pass http://${EDGE_HOST}-21f4678fd8adba8903ca9c631d21ba6ce9802c0c/.well-known/$1;
+      }
+      # /frontend  -> sha1("/frontend/"). It serves signed metadata under its
+      # own identity, so it is a credential issuer for discovery purposes, and
+      # it is its own authorization server too: no authorization_servers, and
+      # issuer = <frontend> in its AS metadata. So all three forms, as /issuer.
+      location ~ ^/\.well-known/(openid-credential-issuer|openid-configuration|oauth-authorization-server)/frontend$ {
+          proxy_pass http://${EDGE_HOST}-cf70a67df60bdc2f86a0213e390eaf0a1185538d/.well-known/$1;
+      }
+      # No resolver needed, and a missing upstream does not stop nginx loading:
+      # the $1 makes each proxy_pass variable, so the name is looked up per
+      # request, among nginx-proxy's upstream groups first. Checked 2026-09-24.
+
+  # Requests without a known Host get 444, nginx closing the connection with no
+  # response. The default 503 tells a scanner something is here worth probing.
+  block-ip-access:
+    content: |
+      server {
+          listen 80 default_server;
+          listen [::]:80 default_server;
+          server_name _;
+          return 444;
+      }
+      server {
+          listen 443 ssl default_server;
+          listen [::]:443 ssl default_server;
+          server_name _;
+          ssl_reject_handshake on;
+          return 444;
+      }
+
+  # The IACA names http://<host>/revocation/crl.pem as its CRL distribution
+  # point. Plain http is normal for CRLs, and a JVM verifier will not follow an
+  # http to https redirect, so that one path must answer on port 80.
+  #
+  # nginx-proxy cannot express this. HTTPS_METHOD is per hostname, not per path,
+  # so noredirect on the CRL container would drop the redirect and HSTS for every
+  # service here, and the generated port-80 server has no include hook. So this
+  # replaces it: loaded before default.conf, it is the server nginx keeps, and
+  # the generated one is ignored with a "conflicting server name" warning.
+  #
+  # It must keep doing what the generated one did. The ACME location is copied
+  # verbatim from nginx-proxy 1.11's template: without it certificate renewal
+  # fails, silently, weeks later. Recheck it when upgrading nginx-proxy.
+  #
+  # The upstream resolves per request through Docker's DNS, so a missing CRL
+  # container is a 502 on this path rather than an nginx that will not start.
+  # eudiw-crl is its container_name in eudi-srv-web-issuing-eudiw-py; CRL_PATH
+  # must match that stack's.
+  http-with-crl-exception:
+    content: |
+      server {
+          listen 80;
+          server_name ${EDGE_HOST};
+          access_log /var/log/nginx/access.log;
+
+          location ^~ /.well-known/acme-challenge/ {
+              auth_basic off;
+              auth_request off;
+              allow all;
+              root /usr/share/nginx/html;
+              try_files $$uri =404;
+              break;
+          }
+
+          location ^~ ${CRL_PATH:?set in stack.env} {
+              resolver 127.0.0.11 valid=30s;
+              set $$crl_upstream http://eudiw-crl;
+              proxy_pass $$crl_upstream;
+              proxy_set_header Host $$host;
+          }
+
+          location / {
+              return 301 https://$$host$$request_uri;
+          }
+      }
+
+  # The platform key attestation endpoints take an X.509 chain from the Android
+  # keystore alongside a JWK set. Under nginx's 1m default a large one would get
+  # a 413 from the proxy before reaching the service, which reads as a client
+  # error rather than a proxy limit.
+  client-max-body-size:
+    content: |
+      client_max_body_size 4m;
+
+  init-sql:
+    content: |
+      CREATE TABLE IF NOT EXISTS challenges (id BIGSERIAL PRIMARY KEY, "value" bytea NOT NULL, created_at TIMESTAMP NOT NULL, expires_at TIMESTAMP NOT NULL, unused BOOLEAN NOT NULL);
+      ALTER TABLE challenges ADD CONSTRAINT challenges_value_unique_idx UNIQUE ("value");
+      CREATE SEQUENCE IF NOT EXISTS challenges_id_seq START WITH 1 MINVALUE 1 MAXVALUE 9223372036854775807;
+
+volumes:
+  proxy-certs:
+  proxy-vhost:
+  proxy-html:
+  proxy-conf:
+  acme-state:
+  postgres-data:
+  signing-keystore:
+
+networks:
+  # Created here and declared external by every other service repository.
+  proxy-net:
+    name: proxy-net
+  # Private to this stack.
+  wallet-provider:
+    name: eudiw-wallet-provider
