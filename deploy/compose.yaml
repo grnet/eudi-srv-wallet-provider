@@ -285,7 +285,7 @@ configs:
       <h2>Wallet app</h2>
       <p>The Android build of the wallet is shared with partners directly for now. A download will appear here once it is published.</p>
 
-      <footer>Demo services, operated by GRNET. Test data only.</footer>
+      <footer><strong>Demo services - Test data only.</strong> Operated by GRNET.</footer>
       </body>
       </html>
 
