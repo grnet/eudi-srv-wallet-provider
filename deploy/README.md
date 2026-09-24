@@ -142,6 +142,30 @@ dropping a file in and running `nginx -s reload` does nothing at all. Use
 `RECREATE=1 ./deploy.sh`. The same applies to changing a config's *content*:
 compose does not recreate a container when only that changed.
 
+### The landing page at /
+
+`eudiw-landing`, stock nginx serving one static page: the demo's front door.
+It links the services, gives the IACA with its fingerprint for partners to
+check a download against, and has a placeholder for the Android wallet build,
+which has no public release yet.
+
+It lives here because it describes the routes this stack's edge defines, so
+the two change together. No JavaScript, every link relative so nothing names
+the host, and a strict `Content-Security-Policy`. As `VIRTUAL_PATH=/` it is the
+hostname's catch-all: any path no service claims gets its plain 404.
+
+Editing the page means editing `landing-html` in `deploy/compose.yaml` and
+deploying. It is a config's content, so like the others it needs
+`RECREATE=1`.
+
+**The fingerprint is `IACA_SHA256` in `stack.env`, and must change on an IACA
+reissue.** The certificate itself is served from the issuer's stack at `/pki/`,
+so the two are in different repositories. `deploy.sh` downloads what `/pki/`
+actually serves, fingerprints it, and fails if the page shows anything else.
+
+If it grows into several pages, or people outside this repo should edit it,
+move it to a repository of its own.
+
 ### Port 80 is ours, not nginx-proxy's
 
 The IACA names `http://<host>/revocation/crl.pem` as its CRL distribution point,

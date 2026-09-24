@@ -138,7 +138,7 @@ jobs:
           fail=0
 
           echo "── containers ──"
-          for c in nginx-proxy eudiw-wallet-provider-db eudiw-wallet-provider; do
+          for c in nginx-proxy eudiw-wallet-provider-db eudiw-wallet-provider eudiw-landing; do
             state=""
             for _ in $(seq 1 12); do
               state=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || echo absent)
