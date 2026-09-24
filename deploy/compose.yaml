@@ -36,12 +36,12 @@ services:
       # Per-vhost, server-block scope. Adds locations rather than modifying
       # generated ones, which is what the plain <host> file is for.
       - source: well-known-discovery
-        target: /etc/nginx/vhost.d/demo.eudiw.grnet.gr
+        target: /etc/nginx/vhost.d/${EDGE_HOST:?set in stack.env}
       # Per-VIRTUAL_PATH, inside one location. Named <host>_<sha1 of path>_location.
       - source: verifier-ui-base-href
-        target: /etc/nginx/vhost.d/demo.eudiw.grnet.gr_fd64cf69ae9646446b46d190dd78629487e3be2f_location
+        target: /etc/nginx/vhost.d/${EDGE_HOST}_fd64cf69ae9646446b46d190dd78629487e3be2f_location
       - source: issuer-frontend-static
-        target: /etc/nginx/vhost.d/demo.eudiw.grnet.gr_cf70a67df60bdc2f86a0213e390eaf0a1185538d_location
+        target: /etc/nginx/vhost.d/${EDGE_HOST}_cf70a67df60bdc2f86a0213e390eaf0a1185538d_location
     networks:
       - proxy-net
 
@@ -237,16 +237,16 @@ configs:
     content: |
       # /issuer  -> sha1("/issuer/")
       location ~ ^/\.well-known/(openid-credential-issuer|openid-configuration|oauth-authorization-server)/issuer$ {
-          proxy_pass http://demo.eudiw.grnet.gr-63f4327c3fa4d49abd74fe2d0bd693119ac65aa7/.well-known/$1;
+          proxy_pass http://${EDGE_HOST}-63f4327c3fa4d49abd74fe2d0bd693119ac65aa7/.well-known/$1;
       }
       # /auth  -> sha1("/auth/")
       location ~ ^/\.well-known/(openid-configuration|oauth-authorization-server)/auth$ {
-          proxy_pass http://demo.eudiw.grnet.gr-a66bfb0225a60bc5c64465d6cd63a199dfe15217/.well-known/$1;
+          proxy_pass http://${EDGE_HOST}-a66bfb0225a60bc5c64465d6cd63a199dfe15217/.well-known/$1;
       }
       # /frontend  -> sha1("/frontend/"). It serves signed metadata under its
       # own identity, so it is a credential issuer for discovery purposes.
       location ~ ^/\.well-known/(openid-credential-issuer)/frontend$ {
-          proxy_pass http://demo.eudiw.grnet.gr-cf70a67df60bdc2f86a0213e390eaf0a1185538d/.well-known/$1;
+          proxy_pass http://${EDGE_HOST}-cf70a67df60bdc2f86a0213e390eaf0a1185538d/.well-known/$1;
       }
 
   # Requests without a known Host get 444, nginx closing the connection with no

@@ -187,7 +187,7 @@ jobs:
           # Retried, because the JVM takes a few seconds past `up -d` before it
           # answers and a 502 in that window is a slow start, not a bad deploy.
           echo "── service answers through the proxy ──"
-          host=$(grep -E '^WALLET_PROVIDER_HOST=' deploy/stack.env | cut -d= -f2)
+          host=$(grep -E '^EDGE_HOST=' deploy/stack.env | cut -d= -f2)
           path=$(grep -E '^WALLET_PROVIDER_PATH=' deploy/stack.env | cut -d= -f2)
           code=000
           for _ in $(seq 1 12); do
