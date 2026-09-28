@@ -101,10 +101,14 @@ Verified 2026-09-19:
 
 Set `WALLET_PROVIDER_PATH=` empty to serve at the hostname root instead.
 
-Two caveats. The Android app hardcodes `walletProviderHost` and needs the
-prefixed value. The status list used to be harder, building its URL from a
-hardcoded Python constant, but it now reads `SERVICE_URL` from the environment.
-See "Configuration" in `eudi-srv-statuslist-py`'s `deploy/README.md`.
+Two caveats. The Android app's dev flavour takes the URL as a build argument,
+and it has to include the prefix:
+
+    -PwalletProviderUrl=https://demo.eudiw.grnet.gr/wallet-provider
+
+The status list used to be harder, building its URL from a hardcoded Python
+constant, but it now reads `SERVICE_URL` from the environment. See
+"Configuration" in `eudi-srv-statuslist-py`'s `deploy/README.md`.
 
 ## This stack carries routing fixes for other services
 
