@@ -104,7 +104,7 @@ Set `WALLET_PROVIDER_PATH=` empty to serve at the hostname root instead.
 Two caveats. The Android app hardcodes `walletProviderHost` and needs the
 prefixed value. The status list used to be harder, building its URL from a
 hardcoded Python constant, but it now reads `SERVICE_URL` from the environment.
-See `WEBUILD/DOCKER.md`.
+See "Configuration" in `eudi-srv-statuslist-py`'s `deploy/README.md`.
 
 ## This stack carries routing fixes for other services
 
@@ -216,11 +216,11 @@ still dropped.
 
 ## Still to sort
 
-- The DNS record, and TLS with it.
-- gfour's manual stack still runs on that box on 5606, 5603 and 5607, and is
-  being retired. No conflicting published port, so the two coexist until then.
-  Every service it ran now has a replacement here, including the CRL. The one
-  thing without one is the APK download, which `:5607` also serves.
+- gfour's manual stack is being retired. As of 2026-09-28, 5606 and 5607 still
+  answer on that box and 5603 does not. No conflicting published port, so the
+  two coexist until then. Every service it ran now has a replacement here,
+  including the CRL. The one thing without one is the APK download, which
+  `:5607` also serves.
 - `TOKENSTATUSLISTSERVICE_SERVICEURL` is now portless, pointing at the
   containerised status list on 443. It has to change in lockstep with that
   service's own `SERVICE_URL`: the wallet provider calls the URL, the status list
