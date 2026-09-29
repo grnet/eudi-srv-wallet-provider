@@ -142,8 +142,9 @@ the page is simply broken.
 
 **Adding one needs the proxy recreated, not reloaded.** docker-gen writes the
 `include` line only when the file exists at template-generation time, so
-dropping a file in and running `nginx -s reload` does nothing at all. Use
-`RECREATE=1 ./deploy.sh`. The same applies to changing a config's *content*:
+dropping a file in and running `nginx -s reload` does nothing at all. Tick
+**Recreate containers even if nothing changed** in the Deploy workflow. The
+same applies to changing a config's *content*:
 compose does not recreate a container when only that changed.
 
 ### The landing page at /
@@ -160,12 +161,11 @@ hostname's catch-all: any path no service claims gets its plain 404.
 
 Editing the page means editing `landing-html` in `deploy/compose.yaml` and
 deploying. It is a config's content, so like the others it needs
-`RECREATE=1`.
+a recreate.
 
 **The fingerprint is `IACA_SHA256` in `stack.env`, and must change on an IACA
 reissue.** The certificate itself is served from the issuer's stack at `/pki/`,
-so the two are in different repositories. `deploy.sh` downloads what `/pki/`
-actually serves, fingerprints it, and fails if the page shows anything else.
+so the two are in different repositories and have to be kept in step by hand.
 
 If it grows into several pages, or people outside this repo should edit it,
 move it to a repository of its own.
@@ -203,9 +203,9 @@ It has three locations:
 
 **The ACME location is the dangerous part.** If it drifts from what
 acme-companion expects, certificate renewal fails, and nothing shows it until
-the certificate expires. Both deploy paths therefore write a probe file into the
-challenge directory and fetch it over http. **Recheck it against the template
-when upgrading nginx-proxy**: `/app/nginx.tmpl` in the container.
+the certificate expires. The deploy workflow therefore writes a probe file into
+the challenge directory and fetches it over http. **Recheck it against the
+template when upgrading nginx-proxy**: `/app/nginx.tmpl` in the container.
 
 The CRL upstream is resolved at request time through Docker's DNS
 (`resolver 127.0.0.11`), not at startup. A static `proxy_pass http://eudiw-crl`

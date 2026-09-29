@@ -1,6 +1,6 @@
 # The wallet provider, plus the shared edge. See deploy/README.md.
 #
-# Use deploy.sh or the Deploy workflow, not compose directly.
+# Use the Deploy workflow, not compose directly.
 #
 # This repository owns nginx-proxy, acme-companion and proxy-net, defined here
 # and nowhere else. Every other stack declares proxy-net external, so this one
@@ -228,8 +228,8 @@ services:
 
 configs:
   # Every link is relative, so nothing here names the host. The fingerprint is
-  # IACA_SHA256 in stack.env; deploy.sh fails if it does not match the
-  # certificate actually served at /pki/.
+  # IACA_SHA256 in stack.env, and has to match the certificate served at
+  # /pki/.
   landing-html:
     content: |
       <!doctype html>
