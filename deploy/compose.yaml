@@ -227,9 +227,9 @@ services:
       - proxy-net
 
 configs:
-  # Every link is relative, so nothing here names the host. The fingerprint is
-  # IACA_SHA256 in stack.env, and has to match the certificate served at
-  # /pki/.
+  # Every link to this demo is relative, so nothing here names the host. The
+  # fingerprint is IACA_SHA256 in stack.env, and has to match the certificate
+  # served at /pki/. The wallet app's link and certificate are in stack.env too.
   landing-html:
     content: |
       <!doctype html>
@@ -283,7 +283,11 @@ configs:
       </table>
 
       <h2>Wallet app</h2>
-      <p>The Android build of the wallet is shared with partners directly for now. A download will appear here once it is published.</p>
+      <p>EUDI Wallet GR, GRNET's Android build of the reference wallet, set up for this demo's issuer and wallet provider. Download the APK from its <a href="${WALLET_RELEASES_URL:?set in stack.env}">releases</a>: take the one marked <strong>Latest</strong>.</p>
+      <table>
+        <tr><td>Signing certificate SHA-256</td><td><code>${WALLET_APK_CERT_SHA256:?set in stack.env}</code></td></tr>
+      </table>
+      <p>To install it, allow your browser to install unknown apps when Android asks.</p>
 
       <footer><strong>Demo services - Test data only.</strong> Operated by GRNET.</footer>
       </body>
