@@ -151,8 +151,8 @@ compose does not recreate a container when only that changed.
 
 `eudiw-landing`, stock nginx serving one static page: the demo's front door.
 It links the services, gives the IACA with its fingerprint for partners to
-check a download against, and has a placeholder for the Android wallet build,
-which has no public release yet.
+check a download against, and sends people to the Android wallet's GitHub
+Releases, with the certificate its APKs are signed with.
 
 It lives here because it describes the routes this stack's edge defines, so
 the two change together. No JavaScript, every link relative so nothing names
@@ -160,12 +160,21 @@ the host, and a strict `Content-Security-Policy`. As `VIRTUAL_PATH=/` it is the
 hostname's catch-all: any path no service claims gets its plain 404.
 
 Editing the page means editing `landing-html` in `deploy/compose.yaml` and
-deploying. It is a config's content, so like the others it needs
-a recreate.
+deploying; a plain deploy is enough. Both deploy paths render the page and its
+nginx config, with the `stack.env` values in them, and pass a hash of the result
+to the container as `LANDING_SHA256`, which nginx never reads. A change to the
+page, or to a value it shows, changes that hash and so the service definition,
+and compose recreates the container. Without it, compose would keep serving
+the old page, as it did on 2026-09-29.
 
 **The fingerprint is `IACA_SHA256` in `stack.env`, and must change on an IACA
 reissue.** The certificate itself is served from the issuer's stack at `/pki/`,
 so the two are in different repositories and have to be kept in step by hand.
+
+**The wallet app is `WALLET_RELEASES_URL` and `WALLET_APK_CERT_SHA256` in
+`stack.env`.** The certificate changes only if the app's keystore does.
+`deploy.sh` checks that the link answers and that the certificate matches the
+one named in the notes of the app's release marked Latest.
 
 If it grows into several pages, or people outside this repo should edit it,
 move it to a repository of its own.

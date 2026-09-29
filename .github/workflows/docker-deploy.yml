@@ -124,6 +124,15 @@ jobs:
 
           export COMPOSE_ENV_FILES=deploy/stack.env
 
+          # Compose does not recreate a container when only a config's content
+          # changes, so the landing page's rendered content goes into its
+          # environment as a hash.
+          LANDING_SHA256=$(LANDING_SHA256=pending $COMPOSE config --format json | python3 -c '
+          import hashlib, json, sys
+          c = json.load(sys.stdin)["configs"]
+          print(hashlib.sha256((c["landing-html"]["content"] + c["landing-nginx"]["content"]).encode()).hexdigest())')
+          export LANDING_SHA256
+
           recreate=""
           [[ "${{ inputs.force_recreate }}" == "true" ]] && recreate="--force-recreate"
 

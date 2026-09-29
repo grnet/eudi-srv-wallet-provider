@@ -218,6 +218,9 @@ services:
       VIRTUAL_PATH: /
       LETSENCRYPT_HOST: ${EDGE_HOST}
       LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL}
+      # Unused by nginx: a hash of the rendered page and its config, so a change
+      # to either, or to a stack.env value in the page, recreates this container.
+      LANDING_SHA256: ${LANDING_SHA256:?set by deploy.sh or the deploy workflow}
     configs:
       - source: landing-html
         target: /usr/share/nginx/html/index.html
