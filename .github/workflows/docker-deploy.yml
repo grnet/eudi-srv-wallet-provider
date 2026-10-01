@@ -80,10 +80,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Leaving image_tag empty deploys sha-<this commit>, which exists only once
-      # Docker build has finished for it. Fail here with the reason, rather than
-      # at the pull on the box with a bare "not found". Reads the registry
-      # directly, so it does not need the remote daemon.
+      # Fail early, with a reason, if the image is not in the registry yet.
       - name: Check the image is built
         env:
           IMAGE: ${{ steps.image.outputs.image }}
@@ -92,7 +89,7 @@ jobs:
           if err=$(docker buildx imagetools inspect "$IMAGE" 2>&1 >/dev/null); then
             echo "found $IMAGE"
           elif grep -q 'not found' <<<"$err"; then
-            echo "::error::$IMAGE is not in the registry. If this commit was just pushed, wait for its Docker build run to finish and deploy again; otherwise pass an image tag that exists."
+            echo "::error::$IMAGE is not in the registry. Wait for its Docker build to finish, or pass an image tag that exists."
             exit 1
           else
             echo "$err"
@@ -213,10 +210,8 @@ jobs:
           # than the container directly. The path carries WALLET_PROVIDER_PATH:
           # the service moved off the host root when the status list took it.
           #
-          # Over https, because port 80 answers this path with a 301 (checked
-          # below). --connect-to sends the edge hostname as SNI and Host while
-          # connecting to nginx-proxy, so the certificate is verified as well:
-          # a 000 here is a TLS or connection failure, not the service.
+          # Over https: port 80 answers with a 301 (checked below). --connect-to
+          # keeps the edge hostname for SNI, so the certificate is checked too.
           #
           # Retried, because the JVM takes a few seconds past `up -d` before it
           # answers and a 502 in that window is a slow start, not a bad deploy.
