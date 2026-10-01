@@ -370,3 +370,5 @@ Temporary Items
 
 # Local modifications
 out.p12
+signing_key.pem
+signing_cert.pem
