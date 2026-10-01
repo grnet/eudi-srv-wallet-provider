@@ -5,12 +5,7 @@ PASSWORD=password
 
 echo "NOTE: use password '${PASSWORD}' when prompted."
 
-echo "Generating signing key..."
-openssl ecparam -name prime256v1 -genkey -noout -out signing_key.pem
-openssl req -new -x509 -sha256 -days 365 \
-    -key signing_key.pem \
-    -config signing.conf -extensions v3 \
-    -out signing_cert.pem
+echo "Reading signing key/certificate..."
 openssl pkcs12 -export -in signing_cert.pem -inkey signing_key.pem \
     -name ${SIGNINGKEY_KEYALIAS} -out out.p12
 
