@@ -54,7 +54,11 @@ with a key pair and CSR of our own:
     SHA-256   5E:FF:92:2F:39:D8:97:89:86:B7:AA:D0:57:17:7F:1D:90:1D:17:E3:19:F7:81:FA:67:D1:68:22:8D:96:41:AC
 
 The onboarding produced `private.key` and `x509_certificate.pem`. The PEM holds
-our certificate and then the CA. Use it as it is: the CA goes into `x5c` too.
+our certificate and then the CA. Use it as it is. The deploy checks our
+certificate against the CA, and the keystore holds both. `x5c` carries only our
+certificate: the app drops a self-signed root from the end of the chain
+(`dropRootCaIfNeeded`), and the WE BUILD CA is one. That is what the list
+matches anyway.
 
     gh secret set SIGNING_KEY_PEM < private.key
     gh variable set SIGNING_CERT_PEM < x509_certificate.pem
@@ -63,7 +67,7 @@ Before touching the box, the deploy checks that the key is the first
 certificate's and that the first certificate verifies against the CA after
 it. A single certificate with no CA only gets a warning, so that rolling back
 to a self-signed key still works. After the deploy, it checks that `/jwks`
-publishes exactly that chain.
+publishes that chain, with or without its last certificate.
 
 **Then deploy the issuer.** Its OIDC server trusts wallet attestations by the
 certificate it reads from this service's `/jwks` at deploy time, so until
@@ -103,7 +107,8 @@ Actions, Deploy, Run workflow.
 
 Verification after the roll: containers running, networks present, provider
 attached to `proxy-net`, `nginx -t` passing, `/jwks` answering through the
-proxy by Host header, and publishing `SIGNING_CERT_PEM` as its `x5c`.
+proxy by Host header, and publishing `SIGNING_CERT_PEM` as its `x5c`, less
+the root CA.
 
 ## TLS
 

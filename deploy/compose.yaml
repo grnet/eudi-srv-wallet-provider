@@ -103,9 +103,10 @@ services:
   # Builds the JWT signing keystore into a named volume, on every deploy, from
   # the key WE BUILD onboarded: the signing-key secret and SIGNING_CERT_PEM.
   #
-  # The keystore's chain is published at /jwks and sent as the x5c of every
-  # attestation, where issuers match it against WE BUILD's Wallet Providers
-  # list. Changing the key invalidates every attestation already issued.
+  # The keystore's chain, less a self-signed root, is published at /jwks and
+  # sent as the x5c of every attestation, where issuers match it against
+  # WE BUILD's Wallet Providers list. Changing the key invalidates every
+  # attestation already issued.
   keystore-init:
     image: eclipse-temurin:25-jdk
     container_name: eudiw-wallet-provider-keystore-init

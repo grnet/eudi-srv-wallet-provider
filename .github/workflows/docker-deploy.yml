@@ -263,7 +263,9 @@ jobs:
 
           # The chain the provider signs with is what it publishes, and what it
           # sends as the x5c of every attestation. Issuers match its first
-          # certificate against WE BUILD's Wallet Providers list.
+          # certificate against WE BUILD's Wallet Providers list. The app leaves
+          # a self-signed root off the end (dropRootCaIfNeeded), so WE BUILD's
+          # CA is in the keystore but not in x5c.
           echo "── /jwks carries SIGNING_CERT_PEM ──"
           jwks=$(docker run --rm --network proxy-net curlimages/curl:8.11.1 \
                    -s --max-time 10 --connect-to "$host:443:nginx-proxy:443" \
@@ -274,9 +276,10 @@ jobs:
               r"-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----",
               os.environ["SIGNING_CERT_PEM"], re.S)]
           x5c = json.loads(os.environ["JWKS"])["keys"][0].get("x5c", [])
-          if x5c != pem:
-              raise SystemExit(f"x5c holds {len(x5c)} certificates, not the {len(pem)} in SIGNING_CERT_PEM")
-          print(f"x5c is SIGNING_CERT_PEM, {len(x5c)} certificates")
+          n = len(x5c)
+          if not (n and x5c == pem[:n] and n >= len(pem) - 1):
+              raise SystemExit(f"x5c does not start with SIGNING_CERT_PEM ({n} certificates against {len(pem)})")
+          print(f"x5c is SIGNING_CERT_PEM, {n} of its {len(pem)} certificates")
           ' 2>&1); then
             echo "  ok   $out"
           else
