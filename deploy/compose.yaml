@@ -100,43 +100,55 @@ services:
     networks:
       - wallet-provider
 
-  # Generates the JWT signing keystore into a named volume on first deploy.
+  # Builds the JWT signing keystore into a named volume, on every deploy, from
+  # the key WE BUILD onboarded: the signing-key secret and SIGNING_CERT_PEM.
   #
-  # Skips if the keystore exists. Its public key is published at /jwks and
-  # verifies every attestation issued, so regenerating it invalidates them all.
+  # The keystore's chain, less a self-signed root, is published at /jwks and
+  # sent as the x5c of every attestation, where issuers match it against
+  # WE BUILD's Wallet Providers list. Changing the key invalidates every
+  # attestation already issued.
   keystore-init:
     image: eclipse-temurin:25-jdk
     container_name: eudiw-wallet-provider-keystore-init
     volumes:
       - signing-keystore:/keystore
+    # Working copies of the key go here, not into the container's own layer,
+    # which outlives the run. The secret itself does stay in the stopped
+    # container, as the issuer's does: readable only with Docker access to the
+    # box, which can read the keystore and its password anyway.
+    tmpfs:
+      - /work
     command:
       - sh
       - -euc
       - |
-        if [ -f /keystore/keystore.jks ]; then
-          echo "keystore.jks exists, leaving it alone"
-          exit 0
+        cd /work
+        printf '%s\n' "$${SIGNING_CERT_PEM}" > chain.pem
+        # Compose writes the secret without its final newline; put it back.
+        printf '%s\n' "$$(cat /run/secrets/signing-key)" > key.pem
+        if [ "$$(openssl pkey -in key.pem -pubout)" != "$$(openssl x509 -in chain.pem -noout -pubkey)" ]; then
+          echo "the signing key does not belong to the first certificate in SIGNING_CERT_PEM" >&2
+          exit 1
         fi
-        echo "generating signing keystore"
-        cd /tmp
-        openssl ecparam -name prime256v1 -genkey -noout -out signing_key.pem
-        openssl req -new -x509 -sha256 -days 365 \
-          -key signing_key.pem -out signing_cert.pem \
-          -subj "/C=GR/ST=Athens/L=Attica/O=GRNET/CN=GRNET Wallet Backend Signer" \
-          -addext "basicConstraints=critical,CA:FALSE" \
-          -addext "keyUsage=critical,digitalSignature" \
-          -addext "subjectKeyIdentifier=hash"
-        openssl pkcs12 -export -in signing_cert.pem -inkey signing_key.pem \
+        openssl pkcs12 -export -in chain.pem -inkey key.pem \
           -name signing_alias -out out.p12 -passout pass:"$${SIGNINGKEY_KEYSTOREPASSWORD}"
+        # Built beside the old one and moved over it, so a failure leaves the
+        # previous keystore in place.
+        rm -f /keystore/keystore.jks.new
         keytool -importkeystore -noprompt \
           -srckeystore out.p12 -srcstoretype PKCS12 \
           -srcstorepass "$${SIGNINGKEY_KEYSTOREPASSWORD}" \
-          -destkeystore /keystore/keystore.jks -deststoretype JKS \
+          -destkeystore /keystore/keystore.jks.new -deststoretype JKS \
           -deststorepass "$${SIGNINGKEY_KEYSTOREPASSWORD}"
-        chmod 644 /keystore/keystore.jks
-        echo "done"
+        chmod 644 /keystore/keystore.jks.new
+        mv -f /keystore/keystore.jks.new /keystore/keystore.jks
+        echo "signing as $$(openssl x509 -in chain.pem -noout -subject)"
     environment:
       SIGNINGKEY_KEYSTOREPASSWORD: ${SIGNINGKEY_KEYSTOREPASSWORD:?repository secret, see deploy/README.md}
+      # The onboarding PEM as downloaded: our certificate, then its CA.
+      SIGNING_CERT_PEM: ${SIGNING_CERT_PEM:?repository variable, see deploy/README.md}
+    secrets:
+      - signing-key
     networks:
       - wallet-provider
 
@@ -173,6 +185,9 @@ services:
       SIGNINGKEY_KEYALIAS: signing_alias
       SIGNINGKEY_KEYPASSWORD: ${SIGNINGKEY_KEYSTOREPASSWORD}
       SIGNINGKEY_ALGORITHM: ES256
+      # Unused by the app: a new certificate changes it, so compose recreates
+      # the provider and it loads the new keystore.
+      SIGNING_CERT_SHA256: ${SIGNING_CERT_SHA256:?set by the deploy workflow}
 
       CLIENTID: ${CLIENTID:?set in stack.env}
 
@@ -220,7 +235,7 @@ services:
       LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL}
       # Unused by nginx: a hash of the rendered page and its config, so a change
       # to either, or to a stack.env value in the page, recreates this container.
-      LANDING_SHA256: ${LANDING_SHA256:?set by deploy.sh or the deploy workflow}
+      LANDING_SHA256: ${LANDING_SHA256:?set by the deploy workflow}
     configs:
       - source: landing-html
         target: /usr/share/nginx/html/index.html
@@ -450,6 +465,11 @@ configs:
       CREATE TABLE IF NOT EXISTS challenges (id BIGSERIAL PRIMARY KEY, "value" bytea NOT NULL, created_at TIMESTAMP NOT NULL, expires_at TIMESTAMP NOT NULL, unused BOOLEAN NOT NULL);
       ALTER TABLE challenges ADD CONSTRAINT challenges_value_unique_idx UNIQUE ("value");
       CREATE SEQUENCE IF NOT EXISTS challenges_id_seq START WITH 1 MINVALUE 1 MAXVALUE 9223372036854775807;
+
+secrets:
+  # The attestation signing key. A secret, so `docker inspect` does not show it.
+  signing-key:
+    environment: SIGNING_KEY_PEM
 
 volumes:
   proxy-certs:

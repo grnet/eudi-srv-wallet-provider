@@ -129,15 +129,40 @@ jobs:
           WALLET_PROVIDER_IMAGE: ${{ steps.image.outputs.image }}
           DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
           SIGNINGKEY_KEYSTOREPASSWORD: ${{ secrets.SIGNINGKEY_KEYSTOREPASSWORD }}
+          SIGNING_KEY_PEM: ${{ secrets.SIGNING_KEY_PEM }}
+          SIGNING_CERT_PEM: ${{ vars.SIGNING_CERT_PEM }}
           TOKENSTATUSLISTSERVICE_APIKEY: ${{ secrets.TOKENSTATUSLISTSERVICE_APIKEY }}
         run: |
           set -euo pipefail
-          for k in DATABASE_PASSWORD SIGNINGKEY_KEYSTOREPASSWORD TOKENSTATUSLISTSERVICE_APIKEY; do
+          for k in DATABASE_PASSWORD SIGNINGKEY_KEYSTOREPASSWORD SIGNING_KEY_PEM TOKENSTATUSLISTSERVICE_APIKEY; do
             if [[ -z "${!k:-}" ]]; then
-              echo "::error::$k is not set; see deploy/README.md"
+              echo "::error::repository secret $k is not set; see deploy/README.md"
               exit 1
             fi
           done
+          if [[ -z "${SIGNING_CERT_PEM:-}" ]]; then
+            echo "::error::repository variable SIGNING_CERT_PEM is not set; see deploy/README.md"
+            exit 1
+          fi
+
+          # The signing certificate is the onboarding PEM as downloaded: our
+          # certificate, then the CA that issued it. Checked here, so a mistake
+          # stops the deploy before anything on the box changes.
+          leaf=$(openssl x509 <<< "$SIGNING_CERT_PEM")
+          if (( $(grep -c 'BEGIN CERTIFICATE' <<< "$SIGNING_CERT_PEM") < 2 )); then
+            echo "::warning::SIGNING_CERT_PEM holds one certificate and no CA. Only this demo's issuer will trust its attestations."
+          elif ! openssl verify -CAfile <(awk 'n; /END CERTIFICATE/ {n=1}' <<< "$SIGNING_CERT_PEM") \
+                   <(printf '%s\n' "$leaf") >/dev/null; then
+            echo "::error::the first certificate in SIGNING_CERT_PEM does not verify against the CA after it"
+            exit 1
+          fi
+          if [[ "$(openssl pkey -pubout <<< "$SIGNING_KEY_PEM")" != "$(openssl x509 -noout -pubkey <<< "$leaf")" ]]; then
+            echo "::error::SIGNING_KEY_PEM is not the key of the first certificate in SIGNING_CERT_PEM"
+            exit 1
+          fi
+          echo "signer $(openssl x509 -noout -subject -enddate <<< "$leaf" | tr '\n' ' ')"
+          SIGNING_CERT_SHA256=$(openssl x509 -noout -fingerprint -sha256 <<< "$leaf" | cut -d= -f2)
+          export SIGNING_CERT_SHA256
 
           export COMPOSE_ENV_FILES=deploy/stack.env
 
@@ -159,6 +184,8 @@ jobs:
       # A green `up -d` only means compose accepted the configuration. It does
       # not mean the containers are still running a moment later, so check.
       - name: Verify
+        env:
+          SIGNING_CERT_PEM: ${{ vars.SIGNING_CERT_PEM }}
         run: |
           set -uo pipefail
           fail=0
@@ -231,6 +258,32 @@ jobs:
             echo "  ok   ${path}jwks returned 200"
           else
             echo "  FAIL ${path}jwks returned $code"
+            fail=1
+          fi
+
+          # The chain the provider signs with is what it publishes, and what it
+          # sends as the x5c of every attestation. Issuers match its first
+          # certificate against WE BUILD's Wallet Providers list. The app leaves
+          # a self-signed root off the end (dropRootCaIfNeeded), so WE BUILD's
+          # CA is in the keystore but not in x5c.
+          echo "── /jwks carries SIGNING_CERT_PEM ──"
+          jwks=$(docker run --rm --network proxy-net curlimages/curl:8.11.1 \
+                   -s --max-time 10 --connect-to "$host:443:nginx-proxy:443" \
+                   "https://$host${path}jwks" || true)
+          if out=$(JWKS="$jwks" python3 -c '
+          import json, os, re
+          pem = [re.sub(r"\s", "", b) for b in re.findall(
+              r"-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----",
+              os.environ["SIGNING_CERT_PEM"], re.S)]
+          x5c = json.loads(os.environ["JWKS"])["keys"][0].get("x5c", [])
+          n = len(x5c)
+          if not (n and x5c == pem[:n] and n >= len(pem) - 1):
+              raise SystemExit(f"x5c does not start with SIGNING_CERT_PEM ({n} certificates against {len(pem)})")
+          print(f"x5c is SIGNING_CERT_PEM, {n} of its {len(pem)} certificates")
+          ' 2>&1); then
+            echo "  ok   $out"
+          else
+            echo "  FAIL $out"
             fail=1
           fi
 

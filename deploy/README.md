@@ -25,12 +25,69 @@ Set on the repository, under Settings, Secrets and variables, Actions.
 | `SSH_KEY` | Private key authorised for `ubuntu@3.69.83.252` |
 | `DATABASE_PASSWORD` | Postgres password |
 | `SIGNINGKEY_KEYSTOREPASSWORD` | JWT signing keystore password |
+| `SIGNING_KEY_PEM` | Attestation signing key, PKCS#8 PEM. See "The signing key" |
 | `TOKENSTATUSLISTSERVICE_APIKEY` | `X-API-Key` for the status list |
 
-`SIGNINGKEY_KEYSTOREPASSWORD` is effectively permanent: `keystore-init` uses it
-on first deploy and skips thereafter. Changing it means regenerating the
-keystore, which changes the key at `/jwks` and invalidates every attestation
-issued under the old one.
+And one variable, under the Variables tab, because it is public:
+
+| Variable | What it is |
+| --- | --- |
+| `SIGNING_CERT_PEM` | The signing key's certificate, followed by the CA that issued it |
+
+`keystore-init` rebuilds the keystore from these on every deploy, so
+`SIGNINGKEY_KEYSTOREPASSWORD` can change freely.
+
+## The signing key
+
+The provider signs wallet instance attestations and key attestations, and
+sends its certificate chain as their `x5c`. Issuers outside this demo trust
+an attestation when that certificate is on WE BUILD's Wallet Providers list:
+
+    https://tl-api.dev.idunion.info/api/v1/8djrdSZa/etsi/tl.xml
+
+GRNET's entry there was onboarded on 2026-09-18, through the idunion console,
+with a key pair and CSR of our own:
+
+    subject   C=GR, ST=Attica, L=Athens, O=GRNET, CN=grnet.gr
+    issuer    O=WEBUILD - WP 4 - Group 5 - Trust Registry Infrastructure
+    valid     2026-09-18 to 2028-09-18
+    SHA-256   5E:FF:92:2F:39:D8:97:89:86:B7:AA:D0:57:17:7F:1D:90:1D:17:E3:19:F7:81:FA:67:D1:68:22:8D:96:41:AC
+
+The onboarding produced `private.key` and `x509_certificate.pem`. The PEM holds
+our certificate and then the CA. Use it as it is. The deploy checks our
+certificate against the CA, and the keystore holds both. `x5c` carries only our
+certificate: the app drops a self-signed root from the end of the chain
+(`dropRootCaIfNeeded`), and the WE BUILD CA is one. That is what the list
+matches anyway.
+
+    gh secret set SIGNING_KEY_PEM < private.key
+    gh variable set SIGNING_CERT_PEM < x509_certificate.pem
+
+Before touching the box, the deploy checks that the key is the first
+certificate's and that the first certificate verifies against the CA after
+it. A single certificate with no CA only gets a warning, so that rolling back
+to a self-signed key still works. After the deploy, it checks that `/jwks`
+publishes that chain, with or without its last certificate.
+
+**Then deploy the issuer.** Its OIDC server trusts wallet attestations by the
+certificate it reads from this service's `/jwks` at deploy time, so until
+`eudi-srv-web-issuing-eudiw-py` is redeployed our own wallet cannot get a
+PID. A plain deploy is enough: the certificate's hash is in that server's
+environment, so compose recreates it.
+
+Changing the key invalidates every attestation issued under the old one.
+Wallets fetch fresh ones, which are short-lived, so the effect is a one-off
+failed request rather than a migration.
+
+To go back to an earlier key, take it out of a copy of the old keystore and
+set it as above:
+
+    keytool -importkeystore -srckeystore keystore.jks -destkeystore old.p12 -deststoretype PKCS12
+    openssl pkcs12 -in old.p12 -nocerts -nodes | openssl pkey > private.key
+    openssl pkcs12 -in old.p12 -nokeys > x509_certificate.pem
+
+The keystore on the box before the switch held a self-signed certificate,
+`CN=GRNET Wallet Backend Signer`, SHA-256 `E4:3C:BA:A9:…:96:61:32`.
 
 ## How it works
 
@@ -49,8 +106,9 @@ Actions, Deploy, Run workflow.
   exactly one build. A branch tag would move under a running deployment.
 
 Verification after the roll: containers running, networks present, provider
-attached to `proxy-net`, `nginx -t` passing, and `/jwks` answering through the
-proxy by Host header.
+attached to `proxy-net`, `nginx -t` passing, `/jwks` answering through the
+proxy by Host header, and publishing `SIGNING_CERT_PEM` as its `x5c`, less
+the root CA.
 
 ## TLS
 
@@ -72,7 +130,12 @@ doing before any change that might fail issuance.
     export COMPOSE_ENV_FILES=deploy/stack.env
     export WALLET_PROVIDER_IMAGE=ghcr.io/grnet/eudi-srv-wallet-provider:sha-<sha>
     export DATABASE_PASSWORD=... SIGNINGKEY_KEYSTOREPASSWORD=... TOKENSTATUSLISTSERVICE_APIKEY=...
+    export SIGNING_KEY_PEM="$(cat private.key)" SIGNING_CERT_PEM="$(cat x509_certificate.pem)"
+    export SIGNING_CERT_SHA256=$(openssl x509 -noout -fingerprint -sha256 <<< "$SIGNING_CERT_PEM" | cut -d= -f2)
+    export LANDING_SHA256=...   # computed by the workflow, see "The landing page at /"
     docker compose -f deploy/compose.yaml -p eudiw up -d
+
+None of the workflow's checks run this way.
 
 ## No bind mounts
 
@@ -160,8 +223,8 @@ the host, and a strict `Content-Security-Policy`. As `VIRTUAL_PATH=/` it is the
 hostname's catch-all: any path no service claims gets its plain 404.
 
 Editing the page means editing `landing-html` in `deploy/compose.yaml` and
-deploying; a plain deploy is enough. Both deploy paths render the page and its
-nginx config, with the `stack.env` values in them, and pass a hash of the result
+deploying; a plain deploy is enough. The deploy workflow renders the page and
+its nginx config, with the `stack.env` values in them, and passes a hash of the result
 to the container as `LANDING_SHA256`, which nginx never reads. A change to the
 page, or to a value it shows, changes that hash and so the service definition,
 and compose recreates the container. Without it, compose would keep serving
@@ -173,8 +236,9 @@ so the two are in different repositories and have to be kept in step by hand.
 
 **The wallet app is `WALLET_RELEASES_URL` and `WALLET_APK_CERT_SHA256` in
 `stack.env`.** The certificate changes only if the app's keystore does.
-`deploy.sh` checks that the link answers and that the certificate matches the
-one named in the notes of the app's release marked Latest.
+Nothing checks them automatically: when either changes, confirm that the link
+answers and that the certificate matches the one named in the notes of the
+app's release marked Latest.
 
 If it grows into several pages, or people outside this repo should edit it,
 move it to a repository of its own.
