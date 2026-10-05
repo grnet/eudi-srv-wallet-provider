@@ -222,9 +222,18 @@ the two change together. No JavaScript, every link relative so nothing names
 the host, and a strict `Content-Security-Policy`. As `VIRTUAL_PATH=/` it is the
 hostname's catch-all: any path no service claims gets its plain 404.
 
+Its header carries the EUDI Wallet and gov.gr BETA logos side by side, as the
+Android wallet's home screen and the verifier UI do. They are the verifier
+UI's own `ic-logo.svg` and `logo_govgr_pos.svg`, unmodified, per the
+[gov.gr brand guide](https://guide.services.gov.gr/docs/brand), served from
+`/landing/` (the CSP allows `img-src 'self'`). Their configs are in
+`deploy/landing-logos.yaml`, which `compose.yaml` includes, so 70 KB of path
+data stays out of the page's markup.
+
 Editing the page means editing `landing-html` in `deploy/compose.yaml` and
-deploying; a plain deploy is enough. The deploy workflow renders the page and
-its nginx config, with the `stack.env` values in them, and passes a hash of the result
+deploying; a plain deploy is enough. The deploy workflow renders every
+`landing-*` config (the page, its nginx config and the logos) with the
+`stack.env` values in them, and passes a hash of the result
 to the container as `LANDING_SHA256`, which nginx never reads. A change to the
 page, or to a value it shows, changes that hash and so the service definition,
 and compose recreates the container. Without it, compose would keep serving

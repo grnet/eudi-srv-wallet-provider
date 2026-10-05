@@ -168,11 +168,11 @@ jobs:
 
           # Compose does not recreate a container when only a config's content
           # changes, so the landing page's rendered content goes into its
-          # environment as a hash.
+          # environment as a hash: every landing-* config, page, nginx and logos.
           LANDING_SHA256=$(LANDING_SHA256=pending $COMPOSE config --format json | python3 -c '
           import hashlib, json, sys
           c = json.load(sys.stdin)["configs"]
-          print(hashlib.sha256((c["landing-html"]["content"] + c["landing-nginx"]["content"]).encode()).hexdigest())')
+          print(hashlib.sha256("".join(c[k]["content"] for k in sorted(c) if k.startswith("landing-")).encode()).hexdigest())')
           export LANDING_SHA256
 
           recreate=""
