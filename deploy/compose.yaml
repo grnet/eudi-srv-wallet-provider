@@ -310,7 +310,7 @@ configs:
         <tr><td><a href="/issuer/">PID issuer</a></td><td>OpenID4VCI credential issuer. Metadata at <a href="/.well-known/openid-credential-issuer/issuer"><code>/.well-known/openid-credential-issuer/issuer</code></a>.</td></tr>
         <tr><td><a href="/issuer/oidc/">Authorization server</a></td><td>OAuth for the issuer. Metadata at <a href="/.well-known/oauth-authorization-server/issuer/oidc"><code>/.well-known/oauth-authorization-server/issuer/oidc</code></a>.</td></tr>
         <tr><td><a href="/token_status_list/swagger/">Status list</a></td><td>Revocation status of issued credentials and attestations.</td></tr>
-        <tr><td><a href="/wallet-provider/jwks">Wallet provider</a></td><td>Wallet instance and key attestations. Its signing keys.</td></tr>
+        <tr><td><a href="/wallet-provider/swagger">Wallet provider</a></td><td>Wallet instance and key attestations. Signing keys at <a href="/wallet-provider/jwks"><code>/wallet-provider/jwks</code></a>.</td></tr>
         <tr><td><a href="/verifier/wallet/public-keys.json">Verifier backend</a></td><td>OpenID4VP. The key its request objects are signed with.</td></tr>
       </table>
 
