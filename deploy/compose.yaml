@@ -272,22 +272,55 @@ configs:
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <title>EUDI Wallet demo · GRNET</title>
       <style>
-        body { font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; max-width: 46rem; margin: 3rem auto; padding: 0 1.25rem; color: #1b1f24; }
-        h1 { font-size: 1.6rem; margin-bottom: .25rem; }
-        h2 { font-size: 1.1rem; margin-top: 2.25rem; border-bottom: 1px solid #d8dee4; padding-bottom: .3rem; }
-        p.lead { color: #57606a; margin-top: 0; }
-        table { border-collapse: collapse; width: 100%; }
-        td { padding: .45rem .5rem .45rem 0; vertical-align: top; border-bottom: 1px solid #eef1f4; }
-        td:first-child { white-space: nowrap; padding-right: 1.25rem; }
-        code { font: .88em ui-monospace, SFMono-Regular, Menlo, monospace; background: #f3f5f7; padding: .1em .3em; border-radius: 3px; word-break: break-all; }
-        a { color: #0550ae; }
-        footer { margin-top: 3rem; color: #57606a; font-size: .9rem; }
-        header { display: flex; align-items: center; gap: 1rem; padding-bottom: 1.25rem; margin-bottom: 1.75rem; border-bottom: 1px solid #d8dee4; }
-        header img { display: block; min-width: 0; height: auto; }
+        :root { --fg: #1b1f24; --muted: #57606a; --line: #d8dee4; --rule: #eef1f4; --code: #f3f5f7; --card: #f6f8fa; --link: #0550ae; }
         @media (prefers-color-scheme: dark) {
-          body { background: #0d1117; color: #e6edf3; } p.lead, footer { color: #8d96a0; }
-          h2 { border-color: #30363d; } td { border-color: #21262d; } code { background: #161b22; } a { color: #4493f8; }
-          header { background: #fff; border: 0; border-radius: 6px; padding: .75rem 1rem; }
+          :root { --fg: #e6edf3; --muted: #8d96a0; --line: #30363d; --rule: #21262d; --code: #161b22; --card: #161b22; --link: #4493f8; }
+          body { background: #0d1117; }
+          header { background: #fff; border: 0; border-radius: 8px; padding: .75rem 1rem; }
+        }
+        * { box-sizing: border-box; }
+        /* The tables get the full width; running text keeps a readable line length. */
+        body { font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; max-width: 62rem; margin: 0 auto; padding: 2.5rem 1.25rem 3rem; color: var(--fg); }
+        p { max-width: 46rem; }
+        h1 { font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2rem); line-height: 1.2; margin: 0 0 .35rem; }
+        h2 { font-size: 1.1rem; margin: 2.5rem 0 .75rem; border-bottom: 1px solid var(--line); padding-bottom: .3rem; }
+        .lead { color: var(--muted); margin-top: 0; }
+        a { color: var(--link); text-underline-offset: .15em; }
+        a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; border-radius: 3px; }
+        header { display: flex; align-items: center; gap: 1rem; padding-bottom: 1.25rem; margin-bottom: 2rem; border-bottom: 1px solid var(--line); }
+        header img { display: block; min-width: 0; height: auto; }
+
+        /* Try it: the three steps of the demo, each one link. Side by side when
+           all three fit, else one under the other, never two and one. */
+        .steps { list-style: none; padding: 0; margin: 0; display: grid; gap: .75rem; grid-template-columns: 1fr; counter-reset: step; }
+        @media (min-width: 50rem) { .steps { grid-template-columns: repeat(3, 1fr); } }
+        .steps li { counter-increment: step; }
+        .steps a { display: flex; flex-direction: column; gap: .2rem; height: 100%; padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: inherit; text-decoration: none; }
+        .steps a:hover { border-color: var(--link); }
+        .steps a::before { content: counter(step); display: grid; place-items: center; width: 1.6rem; height: 1.6rem; margin-bottom: .35rem; border-radius: 50%; background: var(--link); color: #fff; font-size: .85rem; font-weight: 600; }
+        .steps strong { color: var(--link); }
+        .steps span { color: var(--muted); font-size: .95rem; }
+
+        table { border-collapse: collapse; width: 100%; }
+        td { padding: .55rem 1rem .55rem 0; vertical-align: top; border-bottom: 1px solid var(--rule); }
+        td:first-child { width: 1%; white-space: nowrap; padding-right: 1.5rem; }
+        code { font: .875em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code); padding: .1em .35em; border-radius: 4px; overflow-wrap: anywhere; }
+        /* A SHA-256 fingerprint, 32 bytes as "XX:", always two lines of 16, so a
+           line never ends inside a byte. 48ch is 16 bytes; the font shrinks to fit
+           narrow screens (48ch of monospace plus padding is about 29.5em). */
+        code.fp { display: block; width: calc(48ch + .7em); word-break: break-all; font-size: min(.875rem, calc((100vw - 3rem) / 30)); padding: .4em .35em; line-height: 1.6; }
+        .note { color: var(--muted); font-size: .95rem; }
+        footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; }
+
+        /* Phones: each table row becomes a label over its value. */
+        @media (max-width: 40rem) {
+          body { padding-top: 1.25rem; }
+          header { margin-bottom: 1.5rem; }
+          h2 { margin-top: 2rem; }
+          table, tbody, tr, td { display: block; width: auto; }
+          tr { padding: .6rem 0; border-bottom: 1px solid var(--rule); }
+          td { padding: 0; border: 0; }
+          td:first-child { width: auto; white-space: normal; padding: 0 0 .2rem; font-weight: 600; }
         }
       </style>
       </head>
@@ -300,17 +333,18 @@ configs:
       <p class="lead">GRNET's deployment of the EU Digital Identity Wallet reference services, for WE BUILD.</p>
 
       <h2>Try it</h2>
-      <table>
-        <tr><td><a href="/frontend/">Issuer frontend</a></td><td>Request a PID into your wallet.</td></tr>
-        <tr><td><a href="/verifier-ui/">Verifier UI</a></td><td>Ask a wallet to present credentials, as a relying party would.</td></tr>
-      </table>
+      <ol class="steps">
+        <li><a href="${WALLET_RELEASES_URL:?set in stack.env}"><strong>Wallet app</strong><span>Install EUDI Wallet GR on an Android phone. See <em>Wallet app</em> below.</span></a></li>
+        <li><a href="/frontend/"><strong>Issuer frontend</strong><span>Request a PID into your wallet.</span></a></li>
+        <li><a href="/verifier-ui/"><strong>Verifier UI</strong><span>Ask a wallet to present credentials, as a relying party would.</span></a></li>
+      </ol>
 
       <h2>Services</h2>
       <table>
-        <tr><td><a href="/issuer/">PID issuer</a></td><td>OpenID4VCI credential issuer. Metadata at <a href="/.well-known/openid-credential-issuer/issuer"><code>/.well-known/openid-credential-issuer/issuer</code></a>.</td></tr>
-        <tr><td><a href="/issuer/oidc/">Authorization server</a></td><td>OAuth for the issuer. Metadata at <a href="/.well-known/oauth-authorization-server/issuer/oidc"><code>/.well-known/oauth-authorization-server/issuer/oidc</code></a>.</td></tr>
+        <tr><td><a href="/issuer/">PID issuer</a></td><td>OpenID4VCI credential issuer. Metadata at <a href="/.well-known/openid-credential-issuer/issuer"><code>/.well-known/<wbr>openid-credential-issuer/<wbr>issuer</code></a>.</td></tr>
+        <tr><td><a href="/issuer/oidc/">Authorization server</a></td><td>OAuth for the issuer. Metadata at <a href="/.well-known/oauth-authorization-server/issuer/oidc"><code>/.well-known/<wbr>oauth-authorization-server/<wbr>issuer/<wbr>oidc</code></a>.</td></tr>
         <tr><td><a href="/token_status_list/swagger/">Status list</a></td><td>Revocation status of issued credentials and attestations.</td></tr>
-        <tr><td><a href="/wallet-provider/swagger">Wallet provider</a></td><td>Wallet instance and key attestations. Signing keys at <a href="/wallet-provider/jwks"><code>/wallet-provider/jwks</code></a>.</td></tr>
+        <tr><td><a href="/wallet-provider/swagger">Wallet provider</a></td><td>Wallet instance and key attestations. Signing keys at <a href="/wallet-provider/jwks"><code>/wallet-provider/<wbr>jwks</code></a>.</td></tr>
         <tr><td><a href="/verifier/wallet/public-keys.json">Verifier backend</a></td><td>OpenID4VP. The key its request objects are signed with.</td></tr>
       </table>
 
@@ -318,18 +352,18 @@ configs:
       <p>Credentials from this demo chain to GRNET's IACA. Configure it as a trust anchor, and check the fingerprint of what you downloaded against the one below.</p>
       <table>
         <tr><td><a href="/pki/root-ca-grnet.pem">IACA certificate</a></td><td><code>CN=PID Issuer CA - GR 01, O=GRNET, C=GR</code></td></tr>
-        <tr><td>SHA-256</td><td><code>${IACA_SHA256:?set in stack.env}</code></td></tr>
+        <tr><td>SHA-256</td><td><code class="fp">${IACA_SHA256:?set in stack.env}</code></td></tr>
         <tr><td><a href="/revocation/crl.pem">Revocation list</a></td><td>The CRL named in the certificate, DER-encoded. Certificates point at it over plain http, which is normal for CRLs: the list itself is signed.</td></tr>
       </table>
 
       <h2>Wallet app</h2>
-      <p>EUDI Wallet GR, GRNET's Android build of the reference wallet, set up for this demo's issuer and wallet provider. Download the APK from its <a href="${WALLET_RELEASES_URL:?set in stack.env}">releases</a>: take the one marked <strong>Latest</strong>.</p>
+      <p>EUDI Wallet GR, GRNET's Android build of the reference wallet, set up for this demo's issuer and wallet provider. Download the APK from its <a href="${WALLET_RELEASES_URL}">releases</a>: take the one marked <strong>Latest</strong>.</p>
       <table>
-        <tr><td>Signing certificate SHA-256</td><td><code>${WALLET_APK_CERT_SHA256:?set in stack.env}</code></td></tr>
+        <tr><td>Signing certificate SHA-256</td><td><code class="fp">${WALLET_APK_CERT_SHA256:?set in stack.env}</code></td></tr>
       </table>
-      <p>To install it, allow your browser to install unknown apps when Android asks.</p>
+      <p class="note">To install it, allow your browser to install unknown apps when Android asks.</p>
 
-      <footer><strong>Demo services - Test data only.</strong> Operated by GRNET.</footer>
+      <footer><strong>Demo services - Test data only.</strong> Operated by <a href="https://grnet.gr/">GRNET</a>.</footer>
       </body>
       </html>
 
