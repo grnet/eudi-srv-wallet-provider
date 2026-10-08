@@ -386,16 +386,25 @@ configs:
       sub_filter 'src="/static/' 'src="/frontend/static/';
       sub_filter_once off;
 
-  # The wallet provider redirects / to its Swagger UI as an absolute /swagger,
-  # and nothing tells it it lives under /wallet-provider/, so the browser drops
-  # the prefix and gets the status list's 404. nginx's default proxy_redirect
-  # only rewrites absolute URLs naming the upstream; this adds the relative
-  # form. Kept here rather than in the app, as with the two rewrites above.
+  # Nothing tells the wallet provider it lives under /wallet-provider/, so its
+  # absolute paths drop the prefix and reach the status list's 404:
+  # - it redirects / to its Swagger UI as /swagger. nginx's default
+  #   proxy_redirect only rewrites absolute URLs naming the upstream; the
+  #   second one adds the relative form.
+  # - the Swagger UI page loads /swagger/openapi.json, and its OAuth2 redirect
+  #   is under /swagger/ too.
+  # - the spec has no servers, so Swagger UI's "Try it out" calls the API at
+  #   the host root. A servers entry with the prefix goes in before "paths".
+  # Kept here rather than in the app, as with the two rewrites above.
   # sha1("/wallet-provider/") = 6ce92592c2ac02a738d464460ca179a499a84834
   wallet-provider-redirect:
     content: |
       proxy_redirect default;
       proxy_redirect / /wallet-provider/;
+      sub_filter_types application/json;
+      sub_filter "'/swagger/" "'/wallet-provider/swagger/";
+      sub_filter '"paths": {' '"servers": [{"url": "/wallet-provider"}], "paths": {';
+      sub_filter_once off;
 
   # RFC 8414 puts discovery metadata at the host root regardless of a service's
   # path, and on this hostname the root belongs to the status list. Without these
