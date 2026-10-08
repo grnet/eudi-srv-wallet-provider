@@ -50,6 +50,8 @@ services:
         target: /etc/nginx/vhost.d/${EDGE_HOST}_fd64cf69ae9646446b46d190dd78629487e3be2f_location
       - source: issuer-frontend-static
         target: /etc/nginx/vhost.d/${EDGE_HOST}_cf70a67df60bdc2f86a0213e390eaf0a1185538d_location
+      - source: wallet-provider-redirect
+        target: /etc/nginx/vhost.d/${EDGE_HOST}_6ce92592c2ac02a738d464460ca179a499a84834_location
     networks:
       - proxy-net
 
@@ -383,6 +385,17 @@ configs:
       sub_filter 'href="/static/' 'href="/frontend/static/';
       sub_filter 'src="/static/' 'src="/frontend/static/';
       sub_filter_once off;
+
+  # The wallet provider redirects / to its Swagger UI as an absolute /swagger,
+  # and nothing tells it it lives under /wallet-provider/, so the browser drops
+  # the prefix and gets the status list's 404. nginx's default proxy_redirect
+  # only rewrites absolute URLs naming the upstream; this adds the relative
+  # form. Kept here rather than in the app, as with the two rewrites above.
+  # sha1("/wallet-provider/") = 6ce92592c2ac02a738d464460ca179a499a84834
+  wallet-provider-redirect:
+    content: |
+      proxy_redirect default;
+      proxy_redirect / /wallet-provider/;
 
   # RFC 8414 puts discovery metadata at the host root regardless of a service's
   # path, and on this hostname the root belongs to the status list. Without these
