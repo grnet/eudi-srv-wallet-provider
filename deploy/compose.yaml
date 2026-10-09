@@ -330,7 +330,7 @@ configs:
         <img src="/landing/govgr-beta.svg" alt="gov.gr beta" width="173" height="52">
       </header>
       <h1>EUDI Wallet demo</h1>
-      <p class="lead">GRNET's deployment of the EU Digital Identity Wallet reference services, for WE BUILD.</p>
+      <p class="lead">GRNET's deployment of the EU Digital Identity Wallet reference services.</p>
 
       <h2>Try it</h2>
       <ol class="steps">
