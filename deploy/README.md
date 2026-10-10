@@ -132,7 +132,6 @@ doing before any change that might fail issuance.
     export DATABASE_PASSWORD=... SIGNINGKEY_KEYSTOREPASSWORD=... TOKENSTATUSLISTSERVICE_APIKEY=...
     export SIGNING_KEY_PEM="$(cat private.key)" SIGNING_CERT_PEM="$(cat x509_certificate.pem)"
     export SIGNING_CERT_SHA256=$(openssl x509 -noout -fingerprint -sha256 <<< "$SIGNING_CERT_PEM" | cut -d= -f2)
-    export LANDING_SHA256=...   # computed by the workflow, see "The landing page at /"
     docker compose -f deploy/compose.yaml -p eudiw up -d
 
 None of the workflow's checks run this way.
@@ -182,7 +181,7 @@ provider:
 
 | Config | For | Why |
 | --- | --- | --- |
-| `well-known-discovery` | issuer, OIDC, issuer frontend | RFC 8414 puts discovery metadata at the host root, which belongs to the status list |
+| `well-known-discovery` | issuer, OIDC, issuer frontend | RFC 8414 puts discovery metadata at the host root, which belongs to the demo site |
 | `verifier-ui-base-href` | verifier UI | Angular bakes `<base href="/">`, so assets resolve to the host root |
 | `issuer-frontend-static` | issuer frontend | Flask `url_for('static')` emits absolute `/static/...`, same effect |
 | `http-with-crl-exception` | CRL | the CRL must answer on plain http without a redirect; see below |
@@ -210,49 +209,18 @@ dropping a file in and running `nginx -s reload` does nothing at all. Tick
 same applies to changing a config's *content*:
 compose does not recreate a container when only that changed.
 
-### The landing page at /
+### The hostname root
 
-`eudiw-landing`, stock nginx serving one static page: the demo's front door.
-It links the services, gives the IACA with its fingerprint for partners to
-check a download against, and sends people to the Android wallet's GitHub
-Releases, with the certificate its APKs are signed with.
+`/` is the demo's site, in its own repository and stack:
+[eudi-landing-page](https://github.com/grnet/eudi-landing-page). The landing page,
+the demos, the `/landing/` logos, and the 404 page for any path no service
+claims. It used to be `eudiw-landing` here, a stock nginx serving inline
+configs, until 2026-10-10; it grew into several pages, as this section once said
+it might. The IACA fingerprint and the wallet app's link and certificate that
+the landing page shows moved with it, to its `deploy/stack.env`.
 
-It lives here because it describes the routes this stack's edge defines, so
-the two change together. No JavaScript, every link relative so nothing names
-the host, and a strict `Content-Security-Policy`. As `VIRTUAL_PATH=/` it is the
-hostname's catch-all: any path no service claims gets its plain 404.
-
-Its header carries the EUDI Wallet and gov.gr BETA logos side by side, as the
-Android wallet's home screen and the verifier UI do. They are the verifier
-UI's own `ic-logo.svg` and `logo_govgr_pos.svg`, unmodified, per the
-[gov.gr brand guide](https://guide.services.gov.gr/docs/brand), served from
-`/landing/` (the CSP allows `img-src 'self'`). In dark mode a `<picture>`
-swaps each for its negative: gov.gr's official `logo_govgr_neg.svg` with the
-light logo's BETA in white, and `ic-logo.svg` with its wordmark white. Their
-configs are in `deploy/landing-logos.yaml`, which `compose.yaml` includes, so
-140 KB of path data stays out of the page's markup.
-
-Editing the page means editing `landing-html` in `deploy/compose.yaml` and
-deploying; a plain deploy is enough. The deploy workflow renders every
-`landing-*` config (the page, its nginx config and the logos) with the
-`stack.env` values in them, and passes a hash of the result
-to the container as `LANDING_SHA256`, which nginx never reads. A change to the
-page, or to a value it shows, changes that hash and so the service definition,
-and compose recreates the container. Without it, compose would keep serving
-the old page, as it did on 2026-09-29.
-
-**The fingerprint is `IACA_SHA256` in `stack.env`, and must change on an IACA
-reissue.** The certificate itself is served from the issuer's stack at `/pki/`,
-so the two are in different repositories and have to be kept in step by hand.
-
-**The wallet app is `WALLET_RELEASES_URL` and `WALLET_APK_CERT_SHA256` in
-`stack.env`.** The certificate changes only if the app's keystore does.
-Nothing checks them automatically: when either changes, confirm that the link
-answers and that the certificate matches the one named in the notes of the
-app's release marked Latest.
-
-If it grows into several pages, or people outside this repo should edit it,
-move it to a repository of its own.
+Its deploy refuses to run while a container named `eudiw-landing` exists, since
+two services at `/` would share one nginx-proxy upstream.
 
 ### Port 80 is ours, not nginx-proxy's
 
