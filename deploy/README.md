@@ -226,9 +226,11 @@ Its header carries the EUDI Wallet and gov.gr BETA logos side by side, as the
 Android wallet's home screen and the verifier UI do. They are the verifier
 UI's own `ic-logo.svg` and `logo_govgr_pos.svg`, unmodified, per the
 [gov.gr brand guide](https://guide.services.gov.gr/docs/brand), served from
-`/landing/` (the CSP allows `img-src 'self'`). Their configs are in
-`deploy/landing-logos.yaml`, which `compose.yaml` includes, so 70 KB of path
-data stays out of the page's markup.
+`/landing/` (the CSP allows `img-src 'self'`). In dark mode a `<picture>`
+swaps each for its negative: gov.gr's official `logo_govgr_neg.svg` with the
+light logo's BETA in white, and `ic-logo.svg` with its wordmark white. Their
+configs are in `deploy/landing-logos.yaml`, which `compose.yaml` includes, so
+140 KB of path data stays out of the page's markup.
 
 Editing the page means editing `landing-html` in `deploy/compose.yaml` and
 deploying; a plain deploy is enough. The deploy workflow renders every

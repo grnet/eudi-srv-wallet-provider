@@ -251,6 +251,10 @@ services:
         target: /usr/share/nginx/html/landing/eudi-wallet.svg
       - source: landing-govgr-beta-svg
         target: /usr/share/nginx/html/landing/govgr-beta.svg
+      - source: landing-eudi-wallet-neg-svg
+        target: /usr/share/nginx/html/landing/eudi-wallet-neg.svg
+      - source: landing-govgr-beta-neg-svg
+        target: /usr/share/nginx/html/landing/govgr-beta-neg.svg
     networks:
       - proxy-net
 
@@ -261,8 +265,8 @@ configs:
   #
   # The header is the EUDI Wallet logo beside gov.gr BETA's, as in the Android
   # wallet's home screen and the verifier UI, gov.gr the larger of the two. In
-  # dark mode it is a white band: gov.gr has a logo for dark backgrounds, but
-  # the EUDI Wallet one does not. The logos are in landing-logos.yaml.
+  # dark mode both switch to their negatives, on the page's own background. The
+  # logos are in landing-logos.yaml.
   landing-html:
     content: |
       <!doctype html>
@@ -276,7 +280,6 @@ configs:
         @media (prefers-color-scheme: dark) {
           :root { --fg: #e6edf3; --muted: #8d96a0; --line: #30363d; --rule: #21262d; --code: #161b22; --card: #161b22; --link: #4493f8; }
           body { background: #0d1117; }
-          header { background: #fff; border: 0; border-radius: 8px; padding: .75rem 1rem; }
         }
         * { box-sizing: border-box; }
         /* The tables get the full width; running text keeps a readable line length. */
@@ -288,7 +291,8 @@ configs:
         a { color: var(--link); text-underline-offset: .15em; }
         a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; border-radius: 3px; }
         header { display: flex; align-items: center; gap: 1rem; padding-bottom: 1.25rem; margin-bottom: 2rem; border-bottom: 1px solid var(--line); }
-        header img { display: block; min-width: 0; height: auto; }
+        header picture { min-width: 0; }
+        header img { display: block; max-width: 100%; height: auto; }
 
         /* Try it: the three steps of the demo, each one link. Side by side when
            all three fit, else one under the other, never two and one. */
@@ -326,8 +330,8 @@ configs:
       </head>
       <body>
       <header>
-        <img src="/landing/eudi-wallet.svg" alt="EU Digital Identity Wallet" width="123" height="40">
-        <img src="/landing/govgr-beta.svg" alt="gov.gr beta" width="173" height="52">
+        <picture><source srcset="/landing/eudi-wallet-neg.svg" media="(prefers-color-scheme: dark)"><img src="/landing/eudi-wallet.svg" alt="EU Digital Identity Wallet" width="123" height="40"></picture>
+        <picture><source srcset="/landing/govgr-beta-neg.svg" media="(prefers-color-scheme: dark)"><img src="/landing/govgr-beta.svg" alt="gov.gr beta" width="173" height="52"></picture>
       </header>
       <h1>EUDI Wallet demo</h1>
       <p class="lead">GRNET's deployment of the EU Digital Identity Wallet reference services.</p>
