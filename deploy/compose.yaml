@@ -284,6 +284,14 @@ configs:
       location ~ ^/\.well-known/(openid-configuration|oauth-authorization-server)/issuer/oidc$ {
           proxy_pass http://${EDGE_HOST}-21f4678fd8adba8903ca9c631d21ba6ce9802c0c/.well-known/$1;
       }
+      # Since the OIDC server's 0.10.0 each issuer frontend has its own issuer,
+      # <host>/issuer/oidc/<frontend id>, and the server answers the RFC 8414
+      # URL itself, at its own root, so the URI goes through unchanged. The rule
+      # above is for the server before 0.10.0, which answered at a stripped
+      # root; drop it once the issuer stack runs 0.10.0 or later.
+      location ~ ^/\.well-known/(openid-configuration|oauth-authorization-server)/issuer/oidc/[A-Za-z0-9_-]+$ {
+          proxy_pass http://${EDGE_HOST}-21f4678fd8adba8903ca9c631d21ba6ce9802c0c$$request_uri;
+      }
       # /frontend  -> sha1("/frontend/"). It serves signed metadata under its
       # own identity, so it is a credential issuer for discovery purposes, and
       # it is its own authorization server too: no authorization_servers, and
