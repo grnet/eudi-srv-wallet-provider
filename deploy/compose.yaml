@@ -293,10 +293,11 @@ configs:
           proxy_pass http://${EDGE_HOST}-21f4678fd8adba8903ca9c631d21ba6ce9802c0c$$request_uri;
       }
       # /frontend  -> sha1("/frontend/"). It serves signed metadata under its
-      # own identity, so it is a credential issuer for discovery purposes, and
-      # it is its own authorization server too: no authorization_servers, and
-      # issuer = <frontend> in its AS metadata. So all three forms, as /issuer.
-      location ~ ^/\.well-known/(openid-credential-issuer|openid-configuration|oauth-authorization-server)/frontend$ {
+      # own identity, so it is a credential issuer for discovery purposes. Until
+      # its 0.11.0 it was its own authorization server too, hence the AS forms.
+      # Since 0.11.0 it also serves jwt-vc-issuer: its URL is the iss of the
+      # SD-JWT VCs, and verifiers look for the signing keys there.
+      location ~ ^/\.well-known/(openid-credential-issuer|openid-configuration|oauth-authorization-server|jwt-vc-issuer)/frontend$ {
           proxy_pass http://${EDGE_HOST}-cf70a67df60bdc2f86a0213e390eaf0a1185538d/.well-known/$1;
       }
       # No resolver needed, and a missing upstream does not stop nginx loading:
