@@ -19,6 +19,13 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      # Unused by nginx: a hash of the configs below, computed by the deploy.
+      # Compose does not recreate a container when only a config's content
+      # changes, so without it a new rule is deployed and never loaded (as on
+      # 2026-11-09). With it, a changed rule changes this service and compose
+      # recreates the proxy. Empty when compose runs without the deploy.
+      EDGE_CONFIG_SHA256: ${EDGE_CONFIG_SHA256:-}
     volumes:
       # Read-only: docker-gen only needs to watch events.
       - /var/run/docker.sock:/tmp/docker.sock:ro

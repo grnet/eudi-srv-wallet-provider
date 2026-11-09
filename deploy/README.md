@@ -204,10 +204,15 @@ the page is simply broken.
 
 **Adding one needs the proxy recreated, not reloaded.** docker-gen writes the
 `include` line only when the file exists at template-generation time, so
-dropping a file in and running `nginx -s reload` does nothing at all. Tick
-**Recreate containers even if nothing changed** in the Deploy workflow. The
-same applies to changing a config's *content*:
-compose does not recreate a container when only that changed.
+dropping a file in and running `nginx -s reload` does nothing at all.
+
+Compose does not recreate a container when only a config's *content* changes,
+and that applies to these inline configs too. On 2026-11-09 two new discovery
+rules deployed and were never loaded: `nginx-proxy` kept the file from its
+creation two weeks earlier. So the deploy (workflow and `deploy.sh`) now hashes
+the configs `nginx-proxy` mounts into its environment, `EDGE_CONFIG_SHA256`,
+and a changed rule recreates it. **Recreate containers even if nothing
+changed** remains for anything else.
 
 ### The hostname root
 

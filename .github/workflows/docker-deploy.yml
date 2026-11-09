@@ -25,7 +25,8 @@ on:
         required: false
         type: string
       # up -d is a no-op when nothing in the service definition changed, so a
-      # redeploy of the same tag does not restart anything.
+      # redeploy of the same tag does not restart anything. A changed proxy rule
+      # does recreate nginx-proxy (EDGE_CONFIG_SHA256).
       force_recreate:
         description: 'Recreate containers even if nothing changed'
         required: false
@@ -165,6 +166,15 @@ jobs:
           export SIGNING_CERT_SHA256
 
           export COMPOSE_ENV_FILES=deploy/stack.env
+
+          # The proxy's configs, hashed into its environment, so a changed rule recreates
+          # it (see EDGE_CONFIG_SHA256 in deploy/compose.yaml).
+          EDGE_CONFIG_SHA256=$($COMPOSE config --format json | python3 -c '
+          import hashlib, json, sys
+          d = json.load(sys.stdin)
+          names = [c["source"] for c in d["services"]["nginx-proxy"].get("configs", [])]
+          print(hashlib.sha256(json.dumps([d["configs"][n] for n in names], sort_keys=True).encode()).hexdigest())')
+          export EDGE_CONFIG_SHA256
 
           recreate=""
           [[ "${{ inputs.force_recreate }}" == "true" ]] && recreate="--force-recreate"
